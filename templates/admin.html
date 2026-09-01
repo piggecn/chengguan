@@ -12,6 +12,16 @@
   {% endfor %}
 {% endwith %}
 
+{% if user.role == 'super' %}
+<form method="post" action="{{ url_for('admin_settings') }}" class="card form tight">
+  <label>分享链接域名（主管理员可配）
+    <input name="base_url" class="input" placeholder="例如 http://192.168.50.65:8755 或 https://cg.pigge.cn" value="{{ base_url }}">
+  </label>
+  <p class="muted small">不填则使用当前访问地址生成分享链接；填了以后复制给队员的链接就用这个域名，粘贴到浏览器即自动登录。</p>
+  <button class="btn btn-mini btn-primary" type="submit">保存域名</button>
+</form>
+{% endif %}
+
 <form method="post" action="{{ url_for('admin_add') }}" class="card form tight">
   <label>姓名
     <input name="name" class="input" placeholder="请输入姓名" required>
@@ -46,10 +56,22 @@
         <span class="tag {{ 'tag-closed' if u2.role in ('super','office','captain') else 'tag-pending' }}">
           {{ role_labels.get(u2.role, u2.role) }}</span>
       </div>
-      <p class="muted small">单位：{{ u2.unit }} · 密码：{{ u2.pin }} · 创建：{{ u2.created_at }}</p>
-      <form method="post" action="{{ url_for('admin_reset', uid=u2.id) }}" class="row gap">
-        <button class="btn btn-mini btn-ghost" type="submit">重置密码（随机新 4 位）</button>
-      </form>
+      <p class="muted small">单位：{{ u2.unit }} ·
+        {% if u2.show_pin %}密码：{{ u2.pin }}{% else %}密码：••••{% endif %}
+        · 创建：{{ u2.created_at }}</p>
+      <div class="row gap">
+        {% if u2.show_pin %}
+        <button type="button" class="btn btn-mini btn-ghost share-btn"
+                data-link="{{ u2.share_url }}">
+          复制登录链接
+        </button>
+        {% endif %}
+        {% if u2.can_reset %}
+        <form method="post" action="{{ url_for('admin_reset', uid=u2.id) }}">
+          <button class="btn btn-mini btn-ghost" type="submit">重置密码</button>
+        </form>
+        {% endif %}
+      </div>
     </div>
   </div>
   {% endfor %}

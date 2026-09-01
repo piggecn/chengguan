@@ -54,6 +54,30 @@ def random_pin() -> str:
     return f"{secrets.randbelow(10000):04d}"
 
 
+def get_setting(key, default=""):
+    row = get_db().execute(
+        "SELECT value FROM settings WHERE key=?", (key,)
+    ).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key, value):
+    get_db().execute(
+        "INSERT INTO settings(key, value) VALUES(?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+    get_db().commit()
+
+
+def base_url():
+    """对外分享链接用的域名：主管理员在账号管理页配置，未配置则用当前访问域名。"""
+    u = (get_setting("base_url") or "").strip().rstrip("/")
+    if not u:
+        u = request.host_url.rstrip("/")
+    return u
+
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "chengguan-local-dev-secret")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=180)
@@ -132,6 +156,10 @@ def init_db():
             handler TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             handled_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
         );
         """)
         cur = db.execute("SELECT COUNT(*) c FROM users")
@@ -317,26 +345,65 @@ def admin_access():
 @require_user
 def admin():
     u = admin_access()
+    db = get_db()
     if u["role"] == "captain":
-        users = get_db().execute(
+        users = db.execute(
             "SELECT * FROM users WHERE unit=? ORDER BY id", (u["unit"],)
         ).fetchall()
         add_units = [u["unit"]]
     elif u["role"] == "office":
-        users = get_db().execute(
+        users = db.execute(
             "SELECT * FROM users ORDER BY unit, id"
         ).fetchall()
         add_units = TEAMS
     else:  # super
-        users = get_db().execute(
+        users = db.execute(
             "SELECT * FROM users ORDER BY unit, id"
         ).fetchall()
         add_units = TEAMS + ["办公室"]
-    return render_template("admin.html", users=users, teams=TEAMS,
+
+    # 密码可见范围：主管理员看全部；办公室看不到主管理员的；中队长只看本队队员(副中队长/队员)
+    share_base = base_url()
+    items = []
+    for row in users:
+        row = dict(row)
+        if u["role"] == "super":
+            row["show_pin"] = True
+        elif u["role"] == "office":
+            row["show_pin"] = row["role"] != "super"
+        else:  # captain
+            row["show_pin"] = row["role"] in ("vice-captain", "member")
+        row["can_reset"] = u["role"] == "super"  # 重置密码仅主管理员
+        if row["show_pin"]:
+            row["share_url"] = (
+                share_base + url_for("personnel",
+                                     unit=row["unit"], name=row["name"],
+                                     pin=row["pin"])
+            )
+        items.append(row)
+
+    return render_template("admin.html", users=items, teams=TEAMS,
                            role_labels=ROLE_LABELS, user=u,
                            add_units=add_units,
+                           base_url=get_setting("base_url", ""),
                            team_roles=[r for r in ADD_ROLES[u["role"]] if r[0] != "office"],
                            office_roles=[r for r in ADD_ROLES[u["role"]] if r[0] == "office"])
+
+
+@app.route("/admin/settings", methods=["POST"])
+@require_user
+def admin_settings():
+    u = admin_access()
+    if u["role"] != "super":
+        flash("只有主管理员可以配置域名", "error")
+        return redirect(url_for("admin"))
+    val = (request.form.get("base_url") or "").strip().rstrip("/")
+    if val and not val.startswith(("http://", "https://")):
+        flash("域名要以 http:// 或 https:// 开头，例如 http://192.168.50.65:8755", "error")
+        return redirect(url_for("admin"))
+    set_setting("base_url", val)
+    flash("分享域名已保存，分享链接将使用：" + (val or "当前访问地址"), "ok")
+    return redirect(url_for("admin"))
 
 
 @app.route("/admin/add", methods=["POST"])
@@ -386,20 +453,39 @@ def admin_add():
 @require_user
 def admin_reset(uid):
     u = admin_access()
+    if u["role"] != "super":
+        flash("只有主管理员可以重置密码", "error")
+        return redirect(url_for("admin"))
     target = get_db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     if not target:
         abort(404)
-    if u["role"] == "captain":
-        if target["unit"] != u["unit"] or target["role"] not in ("vice-captain", "member"):
-            abort(403)
-    elif u["role"] == "office":
-        if target["role"] not in ("vice-captain", "member"):
-            abort(403)
     pin = random_pin()
     get_db().execute("UPDATE users SET pin=? WHERE id=?", (pin, uid))
     get_db().commit()
     flash(f"已重置 {target['name']} 密码，新密码 {pin}，请转交本人", "ok")
     return redirect(url_for("admin"))
+
+
+# ---------- 修改自己的密码（所有人） ----------
+@app.route("/password", methods=["GET", "POST"])
+@require_user
+def password():
+    u = current_user()
+    if request.method == "POST":
+        cur = (request.form.get("current") or "").strip()
+        new = (request.form.get("new") or "").strip()
+        confirm = (request.form.get("confirm") or "").strip()
+        if u["pin"] != cur:
+            return render_template("password.html", error="当前密码不对")
+        if len(new) != 4 or not new.isdigit():
+            return render_template("password.html", error="新密码必须是 4 位数字")
+        if new != confirm:
+            return render_template("password.html", error="两次输入的新密码不一致")
+        get_db().execute("UPDATE users SET pin=? WHERE id=?", (new, u["id"]))
+        get_db().commit()
+        flash("密码修改成功", "ok")
+        return redirect(url_for("index"))
+    return render_template("password.html", error=None)
 
 
 # ---------- 巡查记录 ----------

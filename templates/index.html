@@ -7,7 +7,7 @@
       <img class="logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
       <div>
         <h1 class="title">社区城管巡查</h1>
-        <p class="sub account-chip">{{ user.name }}{% if role_labels.get(user.role, user.role) != user.name %}（{{ role_labels.get(user.role, user.role) }}）{% endif %} · {{ user.unit }} · <a href="{{ url_for('logout') }}">切换</a></p>
+        <p class="sub account-chip">{{ user.name }}{% if role_labels.get(user.role, user.role) != user.name %}（{{ role_labels.get(user.role, user.role) }}）{% endif %} · {{ user.unit }} · <a href="{{ url_for('logout') }}">切换</a> · <a href="{{ url_for('password') }}">改密</a></p>
       </div>
     </div>
     <div class="row gap">
@@ -30,6 +30,12 @@
   <div class="stat"><b>{{ stats.pending }}</b><span>待处理</span></div>
   <div class="stat"><b>{{ stats.closed }}</b><span>已办结</span></div>
 </div>
+
+{% with msgs = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in msgs %}
+  <div class="banner {{ 'banner-ok' if cat == 'ok' else '' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
 
 <div id="draft-banner" class="banner hidden">
   <span id="draft-text">有记录待上传</span>
