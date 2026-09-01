@@ -11,8 +11,6 @@
       </div>
     </div>
     <div class="row gap">
-      <a href="{{ url_for('export_data') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
-         class="btn btn-ghost" title="导出当前筛选结果（Excel+照片ZIP）">导出</a>
       {% if user.role in ('super', 'office', 'captain') %}
       <a href="{{ url_for('admin') }}" class="icon-btn" title="账号管理" aria-label="账号管理">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
@@ -26,9 +24,9 @@
 </header>
 
 <div class="stat-row">
-  <div class="stat"><b>{{ stats.month_new }}</b><span>本月发现</span></div>
-  <div class="stat"><b>{{ stats.pending }}</b><span>待处理</span></div>
-  <div class="stat"><b>{{ stats.closed }}</b><span>已办结</span></div>
+  <a class="stat" href="{{ url_for('index', month=this_month) }}"><b>{{ stats.month_new }}</b><span>本月发现</span></a>
+  <a class="stat" href="{{ url_for('index', status='pending') }}"><b>{{ stats.pending }}</b><span>待处理</span></a>
+  <a class="stat stat-green" href="{{ url_for('index', status='closed') }}"><b>{{ stats.closed }}</b><span>已办结</span></a>
 </div>
 
 {% with msgs = get_flashed_messages(with_categories=true) %}
@@ -37,9 +35,15 @@
   {% endfor %}
 {% endwith %}
 
-<div id="draft-banner" class="banner hidden">
-  <span id="draft-text">有记录待上传</span>
-  <button id="draft-retry" class="btn btn-mini">点击补传</button>
+<div id="draft-area" class="hidden">
+  <div class="banner">
+    <span id="draft-text">有记录待上传</span>
+    <div class="row gap">
+      <button id="draft-toggle" class="btn btn-mini">查看</button>
+      <button id="draft-retry" class="btn btn-mini">全部补传</button>
+    </div>
+  </div>
+  <div id="draft-panel" class="draft-panel hidden"></div>
 </div>
 
 <form method="get" class="filter-row" onchange="this.submit()">
@@ -70,6 +74,8 @@
     <option value="pending" {% if sel.status == 'pending' %}selected{% endif %}>待处理</option>
     <option value="closed" {% if sel.status == 'closed' %}selected{% endif %}>已办结</option>
   </select>
+  <input type="search" name="q" class="input" placeholder="搜索小区/描述"
+         value="{{ sel.q }}" onchange="this.form.submit()">
   {% if sel.month %}<input type="hidden" name="month" value="{{ sel.month }}">{% endif %}
   {% if sel.community %}<input type="hidden" name="community" value="{{ sel.community }}">{% endif %}
 </form>
@@ -79,6 +85,25 @@
   · <a href="{{ url_for('index') }}">清除</a>
 </div>
 {% endif %}
+
+<div class="export-row">
+  <div class="row gap">
+    <button type="button" class="btn btn-mini btn-primary" id="export-toggle">导出</button>
+    <span class="muted small" id="export-hint">按当前筛选导出记录与照片</span>
+  </div>
+  <div id="export-panel" class="export-panel hidden">
+    <label class="export-label">时间段（可选，留空导出全部）</label>
+    <div class="row gap export-fields">
+      <input type="date" id="exp-start" class="input export-date">
+      <span class="muted">至</span>
+      <input type="date" id="exp-end" class="input export-date">
+    </div>
+    <div class="row gap">
+      <button type="button" class="btn btn-mini btn-primary" id="export-zip">导出ZIP（Excel+照片）</button>
+      <button type="button" class="btn btn-mini btn-ghost" id="export-doc">导出Word（图文台账）</button>
+    </div>
+  </div>
+</div>
 
 <div class="list">
   {% for r in records %}
@@ -90,9 +115,14 @@
     {% endif %}
     <div class="card-body">
       <div class="row between">
-        <b class="ellipsis">{{ r.community }} · {{ r.category }}</b>
-        <span class="tag {{ 'tag-closed' if r.status == 'closed' else 'tag-pending' }}">
-          {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
+        <b class="ellipsis">{{ r.community or '未填小区' }} · {{ r.category }}</b>
+        <span class="row gap">
+          {% if r.status == 'pending' and r.days_pending is not none and r.days_pending > 3 %}
+          <span class="tag tag-overdue">{{ r.days_pending }}天</span>
+          {% endif %}
+          <span class="tag {{ 'tag-closed' if r.status == 'closed' else 'tag-pending' }}">
+            {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
+        </span>
       </div>
       <p class="muted small">{{ r.team }} · {{ r.reporter }} · {{ r.created_at }}</p>
       <p class="muted desc-wrap">{{ r.description }}</p>

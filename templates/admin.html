@@ -20,6 +20,10 @@
   <p class="muted small">不填则使用当前访问地址生成分享链接；填了以后复制给队员的链接就用这个域名，粘贴到浏览器即自动登录。</p>
   <button class="btn btn-mini btn-primary" type="submit">保存域名</button>
 </form>
+<div class="card form tight">
+  <p class="muted small">把数据库和全部照片打包下载，NAS 出问题也能恢复。</p>
+  <a class="btn btn-mini btn-primary" href="{{ url_for('admin_backup') }}">下载全量备份</a>
+</div>
 {% endif %}
 
 <form method="post" action="{{ url_for('admin_add') }}" class="card form tight">
@@ -76,6 +80,20 @@
   </div>
   {% endfor %}
 </div>
+
+{% if user.role == 'super' %}
+<div class="card form tight">
+  <b>操作日志（最近 100 条）</b>
+  {% for l in logs %}
+  <div class="log-item">
+    <span class="muted small">{{ l.created_at }} · {{ l.user }} · {{ l.action }}</span>
+    <span class="small">{{ l.detail }}</span>
+  </div>
+  {% else %}
+  <p class="muted small">暂无日志</p>
+  {% endfor %}
+</div>
+{% endif %}
 
 <script id="role-data" type="application/json">
 {"team": {{ team_roles|tojson }}, "office": {{ office_roles|tojson }}}

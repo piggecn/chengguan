@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}编辑巡查记录{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('detail', rid=r.id) }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">编辑巡查记录</h1></div>
+</header>
+<form method="post" class="form">
+  <label>所属中队
+    {% if user.role in ('captain', 'vice-captain', 'member') %}
+    <span class="input readonly">{{ user.unit }}</span>
+    <input type="hidden" name="team" value="{{ user.unit }}">
+    {% else %}
+    <select name="team" class="input" required>
+      {% for t in teams %}
+      <option value="{{ t }}" {% if r.team == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </label>
+  <label>小区名称（可不填）
+    <input name="community" class="input" list="community-list" value="{{ r.community }}" autocomplete="off">
+    <datalist id="community-list"></datalist>
+  </label>
+  <label>问题分类（点选，可不选，默认“其他”）
+    <span class="chip-grid">
+      {% for c in categories %}
+      <label class="chip">
+        <input type="radio" name="category" value="{{ c }}"
+               {% if r.category == c %}checked{% endif %}>
+        <span>{{ c }}</span>
+      </label>
+      {% endfor %}
+    </span>
+  </label>
+  <label>问题描述（可不填）
+    <textarea name="description" class="input textarea" rows="4">{{ r.description }}</textarea>
+  </label>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button class="btn btn-primary" type="submit">保存修改</button>
+</form>
+{% endblock %}

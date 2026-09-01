@@ -136,6 +136,43 @@
     });
   }
 
+  // ---------- 导出：折叠面板，携带当前筛选条件 ----------
+  var exportToggle = document.getElementById("export-toggle");
+  var exportPanel = document.getElementById("export-panel");
+  var exportHint = document.getElementById("export-hint");
+  var filterForm = document.querySelector("form.filter-row");
+  function buildExportUrl(path) {
+    var params = new URLSearchParams();
+    ["team", "category", "reporter", "status"].forEach(function (k) {
+      if (filterForm && filterForm.elements[k] && filterForm.elements[k].value) {
+        params.set(k, filterForm.elements[k].value);
+      }
+    });
+    var s = document.getElementById("exp-start"),
+        e = document.getElementById("exp-end");
+    if (s && s.value) { params.set("start", s.value); }
+    if (e && e.value) { params.set("end", e.value); }
+    return path + (params.toString() ? "?" + params.toString() : "");
+  }
+  if (exportToggle && exportPanel) {
+    exportToggle.addEventListener("click", function () {
+      var hidden = exportPanel.classList.toggle("hidden");
+      exportToggle.textContent = hidden ? "导出" : "收起";
+    });
+  }
+  var zipBtn = document.getElementById("export-zip");
+  var docBtn = document.getElementById("export-doc");
+  if (zipBtn) {
+    zipBtn.addEventListener("click", function () {
+      window.location.href = buildExportUrl("/export");
+    });
+  }
+  if (docBtn) {
+    docBtn.addEventListener("click", function () {
+      window.location.href = buildExportUrl("/export/doc");
+    });
+  }
+
   // ---------- 账号管理页：复制登录链接（服务端已按配置域名生成，打开即自动登录） ----------
   document.querySelectorAll(".share-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -285,25 +322,31 @@
         fields[el.name] = el.value;
       }
     });
-    return { url: form.action, fields: fields, files: files };
+    return { url: form.action, fields: fields, files: files, ts: Date.now() };
   }
 
   function draftToFormData(draft) {
     var fd = new FormData();
     Object.keys(draft.fields).forEach(function (k) { fd.append(k, draft.fields[k]); });
-    draft.files.forEach(function (f) { fd.append(f.name, f.file, f.file.name); });
+    (draft.files || []).forEach(function (f) { fd.append(f.name, f.file, f.file.name); });
     return fd;
   }
 
-  // 拦截表单提交：服务器校验失败 → 直接提示错误；网络失败 → 存草稿，跳首页
+  function isLoginPage(url) {
+    return /\/personnel/.test(url || "");
+  }
+
+  // 拦截表单提交：登录过期/服务端校验失败 → 提示原因；网络失败 → 存草稿
   document.querySelectorAll("form[data-draft]").forEach(function (form) {
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var fd = new FormData(form);
       fetch(form.action, { method: "POST", body: fd })
         .then(function (resp) {
+          if (resp.redirected && isLoginPage(resp.url)) {
+            throw { needLogin: true };
+          }
           if (!resp.ok) {
-            // 服务端返回了校验错误（如分类没选），把真实原因提示出来，不存草稿
             return resp.text().then(function (t) {
               var m = t.match(/class="error">([^<]+)</);
               throw { serverError: m ? m[1] : ("提交失败（HTTP " + resp.status + "），请重试") };
@@ -312,6 +355,10 @@
           window.location.href = resp.redirected && resp.url ? resp.url : "/";
         })
         .catch(function (err) {
+          if (err && err.needLogin) {
+            alert("登录已过期，请重新登录后再提交。");
+            return;
+          }
           if (err && err.serverError) {
             alert(err.serverError);
             return;
@@ -324,32 +371,116 @@
     });
   });
 
-  // 首页：待上传横幅
-  var banner = document.getElementById("draft-banner");
-  var bannerText = document.getElementById("draft-text");
-  var retryBtn = document.getElementById("draft-retry");
-  if (banner) {
-    listDrafts().then(function (drafts) {
-      if (drafts.length) {
-        bannerText.textContent = drafts.length + " 条记录待上传（离线暂存）";
-        banner.classList.remove("hidden");
+  // 首页：待上传草稿面板
+  var draftArea = document.getElementById("draft-area");
+  var draftText = document.getElementById("draft-text");
+  var draftToggle = document.getElementById("draft-toggle");
+  var draftRetry = document.getElementById("draft-retry");
+  var draftPanel = document.getElementById("draft-panel");
+
+  function draftTitle(d) {
+    var f = d.fields || {};
+    return f.community || f.result || "（无标题）";
+  }
+
+  function renderDrafts() {
+    return listDrafts().then(function (drafts) {
+      if (!drafts.length) {
+        draftArea.classList.add("hidden");
+        draftPanel.innerHTML = "";
+        return;
       }
+      draftArea.classList.remove("hidden");
+      draftText.textContent = drafts.length + " 条记录待上传（离线暂存）";
+      draftPanel.innerHTML = "";
+      drafts.forEach(function (d) {
+        var item = document.createElement("div");
+        item.className = "draft-item";
+        var info = document.createElement("div");
+        info.className = "draft-info";
+        info.innerHTML = "<b>" + escapeHtml(draftTitle(d)) + "</b>" +
+          (d.ts ? "<span class='muted small'>" + new Date(d.ts).toLocaleString() + "</span>" : "");
+        var btnRetry = document.createElement("button");
+        btnRetry.className = "btn btn-mini btn-primary";
+        btnRetry.textContent = "补传";
+        btnRetry.addEventListener("click", function () { retryOne(d); });
+        var btnDel = document.createElement("button");
+        btnDel.className = "btn btn-mini btn-danger";
+        btnDel.textContent = "删除";
+        btnDel.addEventListener("click", function () {
+          if (!confirm("删除这条待上传记录？")) return;
+          deleteDraft(d.id).then(renderDrafts);
+        });
+        var actions = document.createElement("div");
+        actions.className = "row gap";
+        actions.appendChild(btnRetry);
+        actions.appendChild(btnDel);
+        item.appendChild(info);
+        item.appendChild(actions);
+        draftPanel.appendChild(item);
+      });
     });
   }
-  if (retryBtn) {
-    retryBtn.addEventListener("click", function () {
-      retryBtn.disabled = true;
-      retryBtn.textContent = "补传中…";
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function retryOne(d) {
+    var path = (d.url || "").replace(/^https?:\/\/[^/]+/, "");
+    if (!path) { alert("无法识别这条记录，请删除后重录。"); return; }
+    fetch(path, { method: "POST", body: draftToFormData(d) })
+      .then(function (resp) {
+        if (resp.redirected && isLoginPage(resp.url)) {
+          throw { needLogin: true };
+        }
+        if (!resp.ok) {
+          return resp.text().then(function (t) {
+            var m = t.match(/class="error">([^<]+)</);
+            throw { serverError: m ? m[1] : ("HTTP " + resp.status) };
+          });
+        }
+        return deleteDraft(d.id);
+      })
+      .then(function () { renderDrafts(); })
+      .catch(function (err) {
+        if (err && err.needLogin) {
+          alert("登录已过期，请重新登录后再补传。");
+        } else if (err && err.serverError) {
+          alert("补传失败：" + err.serverError);
+        } else {
+          alert("补传失败：网络不通，稍后再试。");
+        }
+      });
+  }
+
+  if (draftArea) {
+    renderDrafts();
+  }
+  if (draftToggle) {
+    draftToggle.addEventListener("click", function () {
+      var hidden = draftPanel.classList.toggle("hidden");
+      draftToggle.textContent = hidden ? "查看" : "收起";
+    });
+  }
+  if (draftRetry) {
+    draftRetry.addEventListener("click", function () {
       listDrafts().then(function (drafts) {
-        var ok = 0, fail = 0;
+        if (!drafts.length) return;
         var chain = Promise.resolve();
+        var ok = 0, fail = 0, loginExpired = false;
         drafts.forEach(function (d) {
           chain = chain.then(function () {
-            // 忽略草稿里保存的旧主机地址，一律补传到当前打开的这台服务器
             var path = (d.url || "").replace(/^https?:\/\/[^/]+/, "");
             if (!path) { fail++; return; }
             return fetch(path, { method: "POST", body: draftToFormData(d) })
               .then(function (resp) {
+                if (resp.redirected && isLoginPage(resp.url)) {
+                  loginExpired = true;
+                  throw { needLogin: true };
+                }
                 if (!resp.ok) { throw new Error("HTTP " + resp.status); }
                 return deleteDraft(d.id).then(function () { ok++; });
               })
@@ -357,8 +488,12 @@
           });
         });
         return chain.then(function () {
-          alert("补传完成：成功 " + ok + " 条" + (fail ? "，失败 " + fail + " 条" : ""));
-          window.location.reload();
+          if (loginExpired) {
+            alert("登录已过期，请重新登录后再补传。");
+          } else {
+            alert("补传完成：成功 " + ok + " 条" + (fail ? "，失败 " + fail + " 条" : ""));
+          }
+          renderDrafts();
         });
       });
     });

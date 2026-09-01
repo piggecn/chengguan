@@ -5,6 +5,12 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">居民投诉</h1></div>
 </header>
 
+{% with msgs = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in msgs %}
+  <div class="banner {{ 'banner-ok' if cat == 'ok' else '' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
 <div class="tabs page-tabs">
   <button type="button" class="tab-btn active" data-tab="complaint-list">投诉记录</button>
   <button type="button" class="tab-btn" data-tab="complaint-add">登记投诉</button>
@@ -25,10 +31,17 @@
           {% if r.handler %} · 处理人：{{ r.handler }}{% endif %}
           {% if r.phone %} · 电话：{{ r.phone }}{% endif %}</p>
         {% if r.thumb %}<img class="thumb small-thumb" src="{{ url_for('uploads', filepath=r.thumb) }}" alt="">{% endif %}
-        <form method="post" action="{{ url_for('complaint_toggle', cid=r.id) }}">
-          <button class="btn btn-mini {{ 'btn-ghost' if r.status == 'done' else 'btn-success' }}" type="submit">
-            {{ '改回待处理' if r.status == 'done' else '标记已处理' }}</button>
-        </form>
+        <div class="row gap">
+          <form method="post" action="{{ url_for('complaint_toggle', cid=r.id) }}">
+            <button class="btn btn-mini {{ 'btn-ghost' if r.status == 'done' else 'btn-success' }}" type="submit">
+              {{ '改回待处理' if r.status == 'done' else '标记已处理' }}</button>
+          </form>
+          <a class="btn btn-mini btn-ghost" href="{{ url_for('complaint_edit', cid=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('complaint_delete', cid=r.id) }}"
+                onsubmit="return confirm('确定删除这条投诉？');">
+            <button class="btn btn-mini btn-danger" type="submit">删除</button>
+          </form>
+        </div>
       </div>
     </div>
     {% else %}

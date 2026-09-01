@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}编辑投诉{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('complaints') }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">编辑投诉</h1></div>
+</header>
+<form method="post" class="card form tight">
+  <label>小区名称
+    <input name="community" class="input" list="community-list" value="{{ c.community }}" autocomplete="off">
+    <datalist id="community-list"></datalist>
+  </label>
+  <label>投诉人电话（可选）
+    <input name="phone" class="input" type="tel" value="{{ c.phone }}">
+  </label>
+  <label>投诉内容
+    <textarea name="content" class="input textarea" rows="3" required>{{ c.content }}</textarea>
+  </label>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button class="btn btn-primary" type="submit">保存修改</button>
+</form>
+{% endblock %}

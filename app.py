@@ -78,6 +78,18 @@ def base_url():
     return u
 
 
+def log_action(action, detail):
+    """操作日志：记录是谁、做了什么。"""
+    u = current_user()
+    if not u:
+        return
+    get_db().execute(
+        "INSERT INTO logs(user, action, detail, created_at) VALUES(?,?,?,?)",
+        (u["name"], action, detail, now()),
+    )
+    get_db().commit()
+
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "chengguan-local-dev-secret")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=180)
@@ -160,6 +172,13 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            created_at TEXT NOT NULL
         );
         """)
         cur = db.execute("SELECT COUNT(*) c FROM users")
@@ -382,10 +401,17 @@ def admin():
             )
         items.append(row)
 
+    logs = []
+    if u["role"] == "super":
+        logs = get_db().execute(
+            "SELECT * FROM logs ORDER BY id DESC LIMIT 100"
+        ).fetchall()
+
     return render_template("admin.html", users=items, teams=TEAMS,
                            role_labels=ROLE_LABELS, user=u,
                            add_units=add_units,
                            base_url=get_setting("base_url", ""),
+                           logs=logs,
                            team_roles=[r for r in ADD_ROLES[u["role"]] if r[0] != "office"],
                            office_roles=[r for r in ADD_ROLES[u["role"]] if r[0] == "office"])
 
@@ -445,6 +471,7 @@ def admin_add():
         (name, unit, role, pin, now()),
     )
     get_db().commit()
+    log_action("创建账号", f"{unit} · {name}（{ROLE_LABELS[role]}）")
     flash(f"已创建 {unit}·{name}（{ROLE_LABELS[role]}），初始密码 {pin}，请转交本人", "ok")
     return redirect(url_for("admin"))
 
@@ -462,6 +489,7 @@ def admin_reset(uid):
     pin = random_pin()
     get_db().execute("UPDATE users SET pin=? WHERE id=?", (pin, uid))
     get_db().commit()
+    log_action("重置密码", f"{target['name']}（{target['unit']}）")
     flash(f"已重置 {target['name']} 密码，新密码 {pin}，请转交本人", "ok")
     return redirect(url_for("admin"))
 
@@ -483,6 +511,7 @@ def password():
             return render_template("password.html", error="两次输入的新密码不一致")
         get_db().execute("UPDATE users SET pin=? WHERE id=?", (new, u["id"]))
         get_db().commit()
+        log_action("修改密码", "修改自己的 4 位密码")
         flash("密码修改成功", "ok")
         return redirect(url_for("index"))
     return render_template("password.html", error=None)
@@ -499,6 +528,7 @@ def index():
     status = request.args.get("status", "")
     month = request.args.get("month", "")
     community = request.args.get("community", "")
+    q = (request.args.get("q") or "").strip()
 
     where, params = scope_where()
     if where and team:
@@ -525,18 +555,30 @@ def index():
     if community:
         where = (where + " AND " if where else "") + "community = ?"
         params.append(community)
+    if q:
+        where = (where + " AND " if where else "") + "(community LIKE ? OR description LIKE ?)"
+        params += [f"%{q}%", f"%{q}%"]
 
     sql = "SELECT * FROM records"
     if where:
         sql += " WHERE " + where
     sql += " ORDER BY id DESC"
     records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
+    today = datetime.now().date()
     for r in records:
         img = get_db().execute(
             "SELECT filepath FROM images WHERE record_id=? AND type='before' "
             "ORDER BY id LIMIT 1", (r["id"],)
         ).fetchone()
         r["thumb"] = thumb_of(img["filepath"]) if img else None
+        if r["status"] == "pending":
+            try:
+                d = datetime.strptime(r["created_at"][:10], "%Y-%m-%d").date()
+                r["days_pending"] = (today - d).days
+            except ValueError:
+                r["days_pending"] = 0
+        else:
+            r["days_pending"] = None
 
     # 统计也按权限范围
     this_month = datetime.now().strftime("%Y-%m")
@@ -590,7 +632,8 @@ def index():
         team_options=team_options, reporter_options=[r["name"] for r in reporter_rows],
         can_all=can_all,
         sel={"team": team, "category": category, "reporter": reporter,
-             "status": status, "month": month, "community": community},
+             "status": status, "month": month, "community": community, "q": q},
+        this_month=this_month,
     )
 
 
@@ -604,19 +647,13 @@ def create():
         else:
             team = (request.form.get("team") or "").strip()
         community = (request.form.get("community") or "").strip()
-        category = (request.form.get("category") or "").strip()
+        category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
         if team not in TEAMS:
             return render_template("create.html", error="请选择所属中队",
                                    teams=TEAMS, categories=CATEGORIES,
                                    user=u), 400
-        if not community or not category or not description:
-            return render_template(
-                "create.html", error="小区、分类、描述都要填",
-                teams=TEAMS, categories=CATEGORIES, user=u,
-                old={"team": team, "community": community,
-                     "category": category, "description": description},
-            ), 400
+        # 小区、分类、描述都可以留空（分类缺省记“其他”），传了之后可在详情页编辑补全
         db = get_db()
         cur = db.execute(
             "INSERT INTO records(team, community, category, description, "
@@ -633,6 +670,8 @@ def create():
             [(rid, "before", p[0], now()) for p in saved],
         )
         db.commit()
+        log_action("新增巡查记录",
+                   f"{team} · {community or '未填小区'} · {category}")
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
     return render_template("create.html", error=None,
@@ -655,6 +694,68 @@ def detail(rid):
     return render_template("detail.html", r=r, before=before, after=after,
                            progress_labels=PROGRESS_LABELS,
                            user=current_user())
+
+
+@app.route("/record/<int:rid>/edit", methods=["GET", "POST"])
+@require_user
+def edit_record(rid):
+    u = current_user()
+    r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        abort(404)
+    if not can_view_record(r):
+        abort(403)
+    if request.method == "POST":
+        team = (request.form.get("team") or "").strip()
+        community = (request.form.get("community") or "").strip()
+        category = (request.form.get("category") or "").strip() or "其他"
+        description = (request.form.get("description") or "").strip()
+        if team not in TEAMS:
+            return render_template("edit.html", r=r, teams=TEAMS,
+                                   categories=CATEGORIES, user=u,
+                                   error="请选择所属中队"), 400
+        get_db().execute(
+            "UPDATE records SET team=?, community=?, category=?, description=? "
+            "WHERE id=?",
+            (team, community, category, description, rid),
+        )
+        get_db().commit()
+        log_action("编辑巡查记录", f"记录#{rid} {community or '未填小区'} · {category}")
+        bump_community(community)
+        return redirect(url_for("detail", rid=rid))
+    return render_template("edit.html", r=r, teams=TEAMS, categories=CATEGORIES,
+                           user=u, error=None)
+
+
+@app.route("/record/<int:rid>/delete", methods=["POST"])
+@require_user
+def delete_record(rid):
+    r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        abort(404)
+    if not can_view_record(r):
+        abort(403)
+    images = get_db().execute(
+        "SELECT filepath FROM images WHERE record_id=?", (rid,)
+    ).fetchall()
+    db = get_db()
+    db.execute("DELETE FROM images WHERE record_id=?", (rid,))
+    db.execute("DELETE FROM records WHERE id=?", (rid,))
+    db.commit()
+    log_action("删除巡查记录",
+               f"记录#{rid} {r['community'] or '未填小区'} · {r['category']}")
+    for img in images:
+        p = UPLOADS_DIR / img["filepath"]
+        try:
+            if p.exists():
+                p.unlink()
+            t = UPLOADS_DIR / thumb_of(img["filepath"])
+            if t.exists():
+                t.unlink()
+        except OSError:
+            pass
+    flash("记录已删除", "ok")
+    return redirect(url_for("index"))
 
 
 @app.route("/record/<int:rid>/close", methods=["GET", "POST"])
@@ -684,6 +785,7 @@ def close(rid):
             "WHERE id=?", (result, now(), rid),
         )
         db.commit()
+        log_action("整改销号", f"记录#{rid} {r['community'] or '未填小区'} · {r['category']}")
         return redirect(url_for("detail", rid=rid))
     return render_template("close.html", r=r, error=None)
 
@@ -714,6 +816,7 @@ def cases():
              now(), now()),
         )
         db.commit()
+        log_action("登记案件", f"{team} · {case_name}")
         return redirect(url_for("cases"))
 
     month = request.args.get("month", "")
@@ -756,6 +859,48 @@ def case_update(cid):
         (progress, float(fine), now(), cid),
     )
     db.commit()
+    log_action("更新案件", f"案件#{cid} 进度={progress} 罚款={fine}")
+    return redirect(url_for("cases"))
+
+
+@app.route("/case/<int:cid>/edit", methods=["GET", "POST"])
+@require_user
+def case_edit(cid):
+    u = current_user()
+    c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
+    if not c or not can_view_case(c):
+        abort(404)
+    if request.method == "POST":
+        if u["role"] in ("super", "office"):
+            team = (request.form.get("team") or "").strip()
+        else:
+            team = c["team"]
+        case_name = (request.form.get("case_name") or "").strip()
+        fine = (request.form.get("fine_amount") or "").strip() or "0"
+        if team not in TEAMS or not case_name:
+            return render_template("case_edit.html", c=c, teams=TEAMS,
+                                   user=u, error="中队和案件名称要填"), 400
+        db = get_db()
+        db.execute(
+            "UPDATE cases SET team=?, case_name=?, fine_amount=?, updated_at=? "
+            "WHERE id=?", (team, case_name, float(fine), now(), cid),
+        )
+        db.commit()
+        log_action("编辑案件", f"案件#{cid} {case_name}")
+        return redirect(url_for("cases"))
+    return render_template("case_edit.html", c=c, teams=TEAMS, user=u, error=None)
+
+
+@app.route("/case/<int:cid>/delete", methods=["POST"])
+@require_user
+def case_delete(cid):
+    c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
+    if not c or not can_view_case(c):
+        abort(404)
+    get_db().execute("DELETE FROM cases WHERE id=?", (cid,))
+    get_db().commit()
+    log_action("删除案件", f"案件#{cid} {c['case_name']}")
+    flash("案件已删除", "ok")
     return redirect(url_for("cases"))
 
 
@@ -792,6 +937,7 @@ def complaints():
             [(cid, "complaint", p[0], now()) for p in saved],
         )
         db.commit()
+        log_action("登记投诉", f"{team} · {community or '未填小区'}")
         bump_community(community)
         return redirect(url_for("complaints"))
     where, params = scope_where()
@@ -834,6 +980,63 @@ def complaint_toggle(cid):
         (new_status, u["name"] if new_status == "done" else "", now(), cid),
     )
     db.commit()
+    log_action("处理投诉", f"投诉#{cid} → {'已处理' if new_status == 'done' else '待处理'}")
+    return redirect(url_for("complaints"))
+
+
+def complaint_access(c):
+    u = current_user()
+    if u["role"] in ("super", "office"):
+        return True
+    if u["role"] in ("captain", "vice-captain"):
+        return c["team"] == u["unit"]
+    return c["reporter"] == u["name"]
+
+
+@app.route("/complaint/<int:cid>/edit", methods=["GET", "POST"])
+@require_user
+def complaint_edit(cid):
+    u = current_user()
+    c = get_db().execute("SELECT * FROM complaints WHERE id=?", (cid,)).fetchone()
+    if not c or not complaint_access(c):
+        abort(404)
+    if request.method == "POST":
+        community = (request.form.get("community") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        content = (request.form.get("content") or "").strip()
+        get_db().execute(
+            "UPDATE complaints SET community=?, phone=?, content=? WHERE id=?",
+            (community, phone, content, cid),
+        )
+        get_db().commit()
+        log_action("编辑投诉", f"投诉#{cid} {community or '未填小区'}")
+        return redirect(url_for("complaints"))
+    return render_template("complaint_edit.html", c=c, user=u, error=None)
+
+
+@app.route("/complaint/<int:cid>/delete", methods=["POST"])
+@require_user
+def complaint_delete(cid):
+    c = get_db().execute("SELECT * FROM complaints WHERE id=?", (cid,)).fetchone()
+    if not c or not complaint_access(c):
+        abort(404)
+    images = get_db().execute(
+        "SELECT filepath FROM images WHERE record_id=? AND type='complaint'", (cid,)
+    ).fetchall()
+    db = get_db()
+    db.execute("DELETE FROM images WHERE record_id=? AND type='complaint'", (cid,))
+    db.execute("DELETE FROM complaints WHERE id=?", (cid,))
+    db.commit()
+    for img in images:
+        for suffix in (img["filepath"], thumb_of(img["filepath"])):
+            p = UPLOADS_DIR / suffix
+            try:
+                if p.exists():
+                    p.unlink()
+            except OSError:
+                pass
+    log_action("删除投诉", f"投诉#{cid} {c['community'] or '未填小区'}")
+    flash("投诉已删除", "ok")
     return redirect(url_for("complaints"))
 
 
@@ -916,6 +1119,8 @@ def export_data():
     status = request.args.get("status", "")
     month = request.args.get("month", "")
     community = request.args.get("community", "")
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
 
     where, params = scope_where()
     if team:
@@ -936,6 +1141,12 @@ def export_data():
     if community:
         where = (where + " AND " if where else "") + "community = ?"
         params.append(community)
+    if start:
+        where = (where + " AND " if where else "") + "created_at >= ?"
+        params.append(start + " 00:00")
+    if end:
+        where = (where + " AND " if where else "") + "created_at <= ?"
+        params.append(end + " 23:59")
 
     sql = "SELECT * FROM records"
     if where:
@@ -1004,7 +1215,121 @@ def export_data():
                 typ = "现场" if img["type"] == "before" else "整改"
                 z.write(p, f"照片/{r['category']}/{i}_{r['community']}_{typ}{j}.jpg")
     buf.seek(0)
-    fname = f"巡查导出_{month or '全部'}.zip".replace("/", "-")
+    range_label = month or (f"{start}_to_{end}" if start or end else "全部")
+    fname = f"巡查导出_{range_label}.zip".replace("/", "-")
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype="application/zip")
+
+
+# ---------- 图文 Word 导出 ----------
+def _export_filters():
+    """解析导出通用筛选参数，返回 (where, params, start, end, month)。"""
+    team = request.args.get("team", "")
+    category = request.args.get("category", "")
+    reporter = request.args.get("reporter", "")
+    status = request.args.get("status", "")
+    month = request.args.get("month", "")
+    community = request.args.get("community", "")
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    where, params = scope_where()
+    for cond, p in [
+        (team, ("team = ?", team)),
+        (category, ("category = ?", category)),
+        (reporter, ("reporter = ?", reporter)),
+        (status if status in ("pending", "closed") else "", ("status = ?", status)),
+    ]:
+        if cond:
+            where = (where + " AND " if where else "") + p[0]
+            params.append(p[1])
+    if month:
+        where = (where + " AND " if where else "") + "created_at LIKE ?"
+        params.append(month + "%")
+    if community:
+        where = (where + " AND " if where else "") + "community = ?"
+        params.append(community)
+    if start:
+        where = (where + " AND " if where else "") + "created_at >= ?"
+        params.append(start + " 00:00")
+    if end:
+        where = (where + " AND " if where else "") + "created_at <= ?"
+        params.append(end + " 23:59")
+    return where, params, start, end, month
+
+
+@app.route("/export/doc")
+@require_user
+def export_doc():
+    from docx import Document
+    from docx.shared import Cm, Pt
+
+    where, params, start, end, month = _export_filters()
+    sql = "SELECT * FROM records"
+    if where:
+        sql += " WHERE " + where
+    sql += " ORDER BY category, community, id"
+    records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
+
+    doc = Document()
+    doc.add_heading("社区城管巡查记录台账", 0)
+    rng = month or (f"{start} ~ {end}" if start or end else "全部")
+    doc.add_paragraph(f"导出范围：{rng}    共 {len(records)} 条记录")
+    if not records:
+        doc.add_paragraph("（无记录）")
+    for i, r in enumerate(records, 1):
+        doc.add_heading(f"{i}. {r['community'] or '未填小区'} · {r['category']}", level=1)
+        doc.add_paragraph(
+            f"所属中队：{r['team']}    上报人：{r['reporter']}\n"
+            f"发现时间：{r['created_at']}"
+            + (f"    销号时间：{r['closed_at']}" if r["closed_at"] else "")
+        )
+        doc.add_paragraph(f"问题描述：{r['description'] or '（未填写）'}")
+        if r["status"] == "closed":
+            doc.add_paragraph(f"处理结果：{r['result'] or '（未填写）'}")
+        imgs = get_db().execute(
+            "SELECT * FROM images WHERE record_id=? ORDER BY id", (r["id"],)
+        ).fetchall()
+        before = [x for x in imgs if x["type"] == "before"]
+        after = [x for x in imgs if x["type"] == "after"]
+        for label, group in (("现场照片", before), ("整改后照片", after)):
+            if not group:
+                continue
+            doc.add_paragraph(label + f"（{len(group)} 张）：")
+            for img in group:
+                p = UPLOADS_DIR / img["filepath"]
+                if p.exists():
+                    try:
+                        doc.add_picture(str(p), width=Cm(14))
+                        doc.paragraphs[-1].alignment = 1
+                    except Exception:
+                        doc.add_paragraph("（图片无法加载）")
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    fname = f"巡查台账_{rng}.docx".replace("/", "-")
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+# ---------- 数据一键备份（主管理员） ----------
+@app.route("/admin/backup")
+@require_user
+def admin_backup():
+    u = current_user()
+    if not u or u["role"] != "super":
+        abort(403)
+    import zipfile as _zip
+    buf = io.BytesIO()
+    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as z:
+        db_path = DATA_DIR / "records.db"
+        if db_path.exists():
+            z.write(db_path, "data/records.db")
+        if UPLOADS_DIR.exists():
+            for f in UPLOADS_DIR.rglob("*"):
+                if f.is_file():
+                    z.write(f, "uploads/" + str(f.relative_to(UPLOADS_DIR)))
+    buf.seek(0)
+    fname = f"chengguan_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/zip")
 

@@ -86,6 +86,7 @@ b { font-weight: 600; }
 .thumb-empty { display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); }
 .tag { padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .tag-pending { background: var(--warning-bg); color: #b06000; }
+.tag-overdue { background: #fce8e6; color: #c5221f; }
 .tag-closed { background: var(--success-bg); color: #137333; }
 .empty { text-align: center; color: var(--muted); padding: 40px 0; }
 
@@ -127,10 +128,27 @@ label .input { margin-top: 4px; }
 /* 详情 */
 .detail { display: block; }
 .detail .desc { margin-top: 8px; white-space: pre-wrap; }
+.detail-actions { margin-top: 12px; }
+.btn-danger { background: #fce8e6; color: #c5221f; }
 .section { padding: 16px; }
 .section h2 { font-size: 15px; margin-bottom: 10px; color: #1557b0; }
 .photo-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .photo-grid img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 8px; display: block; }
+.draft-panel {
+  margin: 0 16px 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.draft-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: #fff; border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+.draft-info { min-width: 0; display: flex; flex-direction: column; }
+.draft-info b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 0; border-bottom: 1px solid #f0f0f0;
+}
+.log-item:last-child { border-bottom: none; }
 
 /* 案件行内编辑 */
 .case-row { display: block; }
@@ -285,6 +303,17 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
   background: var(--primary-bg); color: var(--primary); font-size: 13px;
 }
 .filter-note a { color: var(--primary); font-weight: 600; }
+.export-row {
+  padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.export-label { font-size: 13px; color: var(--muted); }
+.export-fields { align-items: center; }
+.export-date { min-height: 38px; font-size: 14px; flex: 1; padding: 6px 8px; }
+.export-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  background: #f8fafc; border-radius: 10px; padding: 10px 12px;
+}
 .pin-wrap { display: flex; gap: 10px; justify-content: center; }
 .pin-box {
   width: 52px; height: 60px; font-size: 28px; text-align: center;

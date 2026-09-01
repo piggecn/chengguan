@@ -8,13 +8,20 @@
 
 <div class="card detail">
   <div class="row between">
-    <b>{{ r.community }} · {{ r.category }}</b>
+    <b>{{ r.community or '未填小区' }} · {{ r.category }}</b>
     <span class="tag {{ 'tag-closed' if r.status == 'closed' else 'tag-pending' }}">
       {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
   </div>
   <p class="muted">{{ r.team }} · 上报人：{{ r.reporter }}</p>
   <p class="muted small">发现时间：{{ r.created_at }}{% if r.closed_at %} · 销号：{{ r.closed_at }}{% endif %}</p>
   <p class="desc">{{ r.description }}</p>
+  <div class="row gap detail-actions">
+    <a class="btn btn-mini btn-ghost" href="{{ url_for('edit_record', rid=r.id) }}">编辑</a>
+    <form method="post" action="{{ url_for('delete_record', rid=r.id) }}"
+          onsubmit="return confirm('确定删除这条记录？照片也会一起删除，不可恢复。');">
+      <button class="btn btn-mini btn-danger" type="submit">删除</button>
+    </form>
+  </div>
 </div>
 
 <section class="section">

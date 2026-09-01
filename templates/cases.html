@@ -5,6 +5,12 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">案件登记</h1></div>
 </header>
 
+{% with msgs = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in msgs %}
+  <div class="banner {{ 'banner-ok' if cat == 'ok' else '' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
 <div class="tabs page-tabs">
   <button type="button" class="tab-btn active" data-tab="case-list">案件列表</button>
   <button type="button" class="tab-btn" data-tab="case-add">登记案件</button>
@@ -50,6 +56,13 @@
                  value="{{ c.fine_amount }}">
           <button class="btn btn-mini btn-primary" type="submit">保存</button>
         </form>
+        <div class="row gap">
+          <a class="btn btn-mini btn-ghost" href="{{ url_for('case_edit', cid=c.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('case_delete', cid=c.id) }}"
+                onsubmit="return confirm('确定删除这个案件？');">
+            <button class="btn btn-mini btn-danger" type="submit">删除</button>
+          </form>
+        </div>
       </div>
     </div>
     {% else %}

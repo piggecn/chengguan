@@ -2,4 +2,5 @@ Flask==3.0.3
 Pillow==10.4.0
 pillow-heif==0.18.0
 openpyxl==3.1.4
+python-docx==1.1.2
 gunicorn==22.0.0

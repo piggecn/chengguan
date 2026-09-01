@@ -19,23 +19,23 @@
     </select>
     {% endif %}
   </label>
-  <label>小区名称
+  <label>小区名称（可不填，之后可编辑补全）
     <input name="community" class="input" list="community-list" placeholder="请输入小区名称，已录过会自动补全"
-           value="{{ old.community if old else '' }}" required autocomplete="off">
+           value="{{ old.community if old else '' }}" autocomplete="off">
     <datalist id="community-list"></datalist>
   </label>
-  <label>问题分类（点选）
+  <label>问题分类（点选，可不选，默认“其他”）
     <span class="chip-grid">
       {% for c in categories %}
       <label class="chip">
         <input type="radio" name="category" value="{{ c }}"
-               {% if old and old.category == c %}checked{% endif %} required>
+               {% if old and old.category == c %}checked{% endif %}>
         <span>{{ c }}</span>
       </label>
       {% endfor %}
     </span>
   </label>
-  <label>问题描述
+  <label>问题描述（可不填，之后可编辑补全）
     <textarea name="description" class="input textarea" rows="4"
               placeholder="简单描述发现的问题">{{ old.description if old else '' }}</textarea>
   </label>
