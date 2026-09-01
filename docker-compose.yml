@@ -3,7 +3,7 @@ services:
     build: .
     container_name: chengguan
     ports:
-      - "8080:5000"
+      - "8755:5000"
     environment:
       # 可选：留空则免登录；填了之后打开站点要先输这个密码
       - ACCESS_PASSWORD=
