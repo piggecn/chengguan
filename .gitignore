@@ -4,3 +4,11 @@ uploads/
 __pycache__/
 *.pyc
 .env
+
+# APK 壳构建产物与密钥不入库
+android/build/
+*.apk
+*.keystore
+
+# APK 更新包不进 git：由 NAS 挂载目录分发（整目录 static/apk）
+static/apk/

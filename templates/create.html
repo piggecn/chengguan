@@ -41,7 +41,8 @@
   </label>
   <label>现场照片（拍照自带时间水印，可多张）
     <input type="file" name="photos" accept="image/*" multiple capture="environment"
-           class="input file">
+           class="input file" id="photo-input">
+    <div class="photo-preview-row" id="photo-preview"></div>
     <span class="muted small" id="photo-hint">未选择照片</span>
   </label>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}

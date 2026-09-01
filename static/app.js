@@ -253,11 +253,47 @@
   var photoInputs = document.querySelectorAll('input[type="file"][name="photos"]');
   photoInputs.forEach(function (input) {
     var hint = document.getElementById("photo-hint");
-    input.addEventListener("change", function () {
+    var previewRow = document.getElementById("photo-preview");
+    var files = [];
+    function syncInput() {
+      try {
+        var dt = new DataTransfer();
+        files.forEach(function (f) { dt.items.add(f); });
+        input.files = dt.files;
+      } catch (e) { /* 不支持 DataTransfer 时保留原 files */ }
+    }
+    function render() {
+      if (!previewRow) { return; }
+      previewRow.innerHTML = "";
+      files.forEach(function (f, idx) {
+        var box = document.createElement("div");
+        box.className = "pv-item";
+        var img = document.createElement("img");
+        img.src = URL.createObjectURL(f);
+        var del = document.createElement("button");
+        del.type = "button";
+        del.className = "pv-del";
+        del.textContent = "×";
+        del.setAttribute("aria-label", "移除照片");
+        del.addEventListener("click", function () {
+          files.splice(idx, 1);
+          syncInput();
+          render();
+        });
+        box.appendChild(img);
+        box.appendChild(del);
+        previewRow.appendChild(box);
+      });
       if (hint) {
-        var n = input.files.length;
-        hint.textContent = n > 0 ? "已选 " + n + " 张照片" : "未选择照片";
+        hint.textContent = files.length > 0 ? "已选 " + files.length + " 张照片" : "未选择照片";
       }
+    }
+    input.addEventListener("change", function () {
+      for (var i = 0; i < input.files.length; i++) {
+        files.push(input.files[i]);
+      }
+      syncInput();
+      render();
     });
   });
 

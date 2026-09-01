@@ -325,3 +325,13 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
   color: var(--muted); cursor: default;
 }
 .banner-ok { background: var(--success-bg); color: #137333; }
+
+/* 选照片缩略图预览 */
+.photo-preview-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.pv-item { position: relative; width: 72px; height: 72px; flex-shrink: 0; }
+.pv-item img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; }
+.pv-del {
+  position: absolute; top: -7px; right: -7px; width: 22px; height: 22px;
+  border-radius: 50%; border: none; background: rgba(0,0,0,.65); color: #fff;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
