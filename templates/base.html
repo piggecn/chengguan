@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='img/logo.png') }}">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a73e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="城管巡查">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+<title>{% block title %}社区城管巡查{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="page">
+{% block content %}{% endblock %}
+</div>
+{% block nav %}{% endblock %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

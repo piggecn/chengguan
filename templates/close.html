@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}整改销号{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('detail', rid=r.id) }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">整改销号</h1></div>
+</header>
+<form method="post" enctype="multipart/form-data" class="form" data-draft="1">
+  <label>处理结果
+    <textarea name="result" class="input textarea" rows="4"
+              placeholder="如：已拆除违建围栏，恢复公共区域" required></textarea>
+  </label>
+  <label>整改后照片（可多张）
+    <input type="file" name="photos" accept="image/*" multiple capture="environment"
+           class="input file">
+    <span class="muted small" id="photo-hint">未选择照片</span>
+  </label>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button class="btn btn-success" type="submit">确认销号</button>
+  <p class="muted small center">弱网提交失败会自动暂存本机，恢复网络后补传</p>
+</form>
+{% endblock %}

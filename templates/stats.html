@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}统计{% endblock %}
+{% block content %}
+<header class="header">
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">数据统计</h1></div>
+</header>
+
+<form method="get" class="month-row">
+  <input type="month" name="month" class="input month-input" value="{{ month }}" onchange="this.form.submit()">
+</form>
+
+<div class="stat-row">
+  <a class="stat" href="{{ url_for('index', month=month) }}"><b>{{ total }}</b><span>发现总数 ›</span></a>
+  <a class="stat stat-green" href="{{ url_for('index', month=month, status='closed') }}"><b>{{ closed }}</b><span>办结数 ›</span></a>
+  <a class="stat" href="{{ url_for('index', month=month) }}"><b>{{ rate }}%</b><span>办结率 ›</span></a>
+</div>
+
+{% if total == 0 and case_total == 0 %}
+<p class="empty">该月份暂无数据，换个月份看看</p>
+{% endif %}
+
+<div class="tabs">
+  <button type="button" class="tab-btn active" data-tab="panel-team">按中队</button>
+  <button type="button" class="tab-btn" data-tab="panel-cat">按问题</button>
+  <button type="button" class="tab-btn" data-tab="panel-com">小区排行</button>
+  <button type="button" class="tab-btn" data-tab="panel-case">案件</button>
+</div>
+<p class="tabs-hint muted small">点任意一块数字可查看对应记录明细</p>
+
+<div id="panel-team" class="panel">
+  {% for t in by_team %}
+  <a class="team-card" href="{{ url_for('index', month=month, team=t.team) }}">
+    <div class="team-head">
+      <span class="ellipsis">{{ t.team }}</span>
+      <span class="row gap">
+        <b class="rate {{ 'rate-green' if t.c and t.closed == t.c else '' }}">{{ (t.closed * 100 // t.c) if t.c else 0 }}%</b>
+        <span class="chev">›</span>
+      </span>
+    </div>
+    <div class="bar-track"><div class="bar-fill {{ 'bar-green' if t.c and t.closed == t.c else '' }}"
+         style="width: {{ (t.closed * 100 // t.c) if t.c else 0 }}%"></div></div>
+    <p class="muted small">发现 {{ t.c }} 件 · 已办结 {{ t.closed }} 件</p>
+  </a>
+  {% else %}
+  <p class="muted small center">该月暂无巡查记录</p>
+  {% endfor %}
+</div>
+
+<div id="panel-cat" class="panel hidden">
+  {% if by_category %}
+  <div class="cat-grid">
+  {% for c in by_category %}
+  <a class="cat-chip {{ 'cat-top' if loop.index == 1 else '' }}"
+     href="{{ url_for('index', month=month, category=c.category) }}">
+    <b>{{ c.c }}</b><span>{{ c.category }}</span>
+  </a>
+  {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted small center">该月暂无巡查记录</p>
+  {% endif %}
+</div>
+
+<div id="panel-com" class="panel hidden">
+  {% for c in by_community %}
+  <a class="com-row" href="{{ url_for('index', month=month, community=c.community) }}">
+    <span class="rank-badge {{ 'rank-top' if loop.index == 1 else '' }}">{{ loop.index }}</span>
+    <span class="ellipsis com-name">{{ c.community }}</span>
+    <b class="com-count">{{ c.c }}件</b>
+    <span class="chev">›</span>
+  </a>
+  {% else %}
+  <p class="muted small center">该月暂无巡查记录</p>
+  {% endfor %}
+</div>
+
+<div id="panel-case" class="panel hidden">
+  {% if case_total %}
+  <a class="com-row" href="{{ url_for('cases', month=month) }}">
+    <span class="com-name">本月全部案件</span>
+    <b class="com-count">{{ case_total }}件</b>
+    <span class="chev">›</span>
+  </a>
+  <p class="case-total-line">共 <b>{{ case_total }}</b> 件 · 罚款合计 <b>¥{{ case_fine }}</b></p>
+  <div class="case-chips">
+    {% for p in case_by_progress %}
+    {% set cls = 'chip-blue' if p.progress == 'investigating' else ('chip-orange' if p.progress == 'filed' else 'chip-green') %}
+    <a class="case-chip {{ cls }}" href="{{ url_for('cases', month=month, progress=p.progress) }}">
+      <b>{{ p.c }}</b><span>{{ progress_labels.get(p.progress, p.progress) }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% for t in case_by_team %}
+  <a class="com-row" href="{{ url_for('cases', month=month, team=t.team) }}">
+    <span class="ellipsis com-name">{{ t.team }}</span>
+    <b class="com-count">{{ t.c }}件</b>
+    <span class="chev">›</span>
+  </a>
+  {% endfor %}
+  {% else %}
+  <p class="muted small center">该月暂无案件</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block nav %}
+<nav class="tabbar">
+  <a class="tab" href="{{ url_for('index') }}">巡查</a>
+  <a class="tab" href="{{ url_for('complaints') }}">投诉</a>
+  <a class="tab" href="{{ url_for('cases') }}">案件</a>
+  <a class="tab active" href="{{ url_for('stats') }}">统计</a>
+</nav>
+{% endblock %}

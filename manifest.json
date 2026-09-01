@@ -1,0 +1,15 @@
+{
+  "name": "社区城管巡查",
+  "short_name": "城管巡查",
+  "description": "社区城管日常巡查记录平台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f0f2f5",
+  "theme_color": "#1a73e8",
+  "icons": [
+    { "src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/img/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}巡查记录{% endblock %}
+{% block content %}
+<header class="header">
+  <div class="row between">
+    <div class="row gap title-row">
+      <img class="logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
+      <div>
+        <h1 class="title">社区城管巡查</h1>
+        <p class="sub account-chip">{{ user.name }}{% if role_labels.get(user.role, user.role) != user.name %}（{{ role_labels.get(user.role, user.role) }}）{% endif %} · {{ user.unit }} · <a href="{{ url_for('logout') }}">切换</a></p>
+      </div>
+    </div>
+    <div class="row gap">
+      <a href="{{ url_for('export_data') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
+         class="btn btn-ghost" title="导出当前筛选结果（Excel+照片ZIP）">导出</a>
+      {% if user.role in ('super', 'office', 'captain') %}
+      <a href="{{ url_for('admin') }}" class="icon-btn" title="账号管理" aria-label="账号管理">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </a>
+    {% endif %}
+  </div>
+</header>
+
+<div class="stat-row">
+  <div class="stat"><b>{{ stats.month_new }}</b><span>本月发现</span></div>
+  <div class="stat"><b>{{ stats.pending }}</b><span>待处理</span></div>
+  <div class="stat"><b>{{ stats.closed }}</b><span>已办结</span></div>
+</div>
+
+<div id="draft-banner" class="banner hidden">
+  <span id="draft-text">有记录待上传</span>
+  <button id="draft-retry" class="btn btn-mini">点击补传</button>
+</div>
+
+<form method="get" class="filter-row" onchange="this.submit()">
+  {% if can_all %}
+  <select name="team" class="input">
+    <option value="">全部中队</option>
+    {% for t in team_options %}
+    <option value="{{ t }}" {% if sel.team == t %}selected{% endif %}>{{ t }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <select name="category" class="input">
+    <option value="">全部分类</option>
+    {% for c in categories %}
+    <option value="{{ c }}" {% if sel.category == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  {% if reporter_options %}
+  <select name="reporter" class="input">
+    <option value="">全部人员</option>
+    {% for n in reporter_options %}
+    <option value="{{ n }}" {% if sel.reporter == n %}selected{% endif %}>{{ n }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <select name="status" class="input">
+    <option value="">全部状态</option>
+    <option value="pending" {% if sel.status == 'pending' %}selected{% endif %}>待处理</option>
+    <option value="closed" {% if sel.status == 'closed' %}selected{% endif %}>已办结</option>
+  </select>
+  {% if sel.month %}<input type="hidden" name="month" value="{{ sel.month }}">{% endif %}
+  {% if sel.community %}<input type="hidden" name="community" value="{{ sel.community }}">{% endif %}
+</form>
+{% if sel.month or sel.community %}
+<div class="filter-note">
+  已筛选：{% if sel.month %}{{ sel.month }} {% endif %}{% if sel.community %}「{{ sel.community }}」{% endif %}
+  · <a href="{{ url_for('index') }}">清除</a>
+</div>
+{% endif %}
+
+<div class="list">
+  {% for r in records %}
+  <a class="card" href="{{ url_for('detail', rid=r.id) }}">
+    {% if r.thumb %}
+    <img class="thumb" src="{{ url_for('uploads', filepath=r.thumb) }}" alt="">
+    {% else %}
+    <div class="thumb thumb-empty">无图</div>
+    {% endif %}
+    <div class="card-body">
+      <div class="row between">
+        <b class="ellipsis">{{ r.community }} · {{ r.category }}</b>
+        <span class="tag {{ 'tag-closed' if r.status == 'closed' else 'tag-pending' }}">
+          {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
+      </div>
+      <p class="muted small">{{ r.team }} · {{ r.reporter }} · {{ r.created_at }}</p>
+      <p class="muted desc-wrap">{{ r.description }}</p>
+    </div>
+  </a>
+  {% else %}
+  <p class="empty">还没有巡查记录，点右下角 + 开始记录</p>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block nav %}
+<nav class="tabbar">
+  <a class="tab active" href="{{ url_for('index') }}">巡查</a>
+  <a class="tab" href="{{ url_for('complaints') }}">投诉</a>
+  <a class="tab" href="{{ url_for('cases') }}">案件</a>
+  <a class="tab" href="{{ url_for('stats') }}">统计</a>
+</nav>
+<a class="fab" href="{{ url_for('create') }}">+</a>
+{% endblock %}

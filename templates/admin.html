@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}账号管理{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('index') }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">账号管理（{{ role_labels.get(user.role, user.role) }}）</h1></div>
+</header>
+
+{% with msgs = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in msgs %}
+  <div class="banner {{ 'banner-ok' if cat == 'ok' else '' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+<form method="post" action="{{ url_for('admin_add') }}" class="card form tight">
+  <label>姓名
+    <input name="name" class="input" placeholder="请输入姓名" required>
+  </label>
+  {% if add_units|length == 1 %}
+  <label>单位
+    <span class="input readonly">{{ add_units[0] }}</span>
+    <input type="hidden" name="unit" value="{{ add_units[0] }}">
+  </label>
+  {% else %}
+  <label>单位
+    <select name="unit" id="add-unit" class="input" required>
+      <option value="" disabled selected>请选择单位</option>
+      {% for t in add_units %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label>角色
+    <select name="role" id="add-role" class="input" required>
+      <option value="" disabled selected>请选择角色</option>
+    </select>
+  </label>
+  <button class="btn btn-primary" type="submit">创建账号（自动生成 4 位密码）</button>
+</form>
+
+<div class="list">
+  {% for u2 in users %}
+  <div class="card case-row">
+    <div class="card-body">
+      <div class="row between">
+        <b>{{ u2.name }}</b>
+        <span class="tag {{ 'tag-closed' if u2.role in ('super','office','captain') else 'tag-pending' }}">
+          {{ role_labels.get(u2.role, u2.role) }}</span>
+      </div>
+      <p class="muted small">单位：{{ u2.unit }} · 密码：{{ u2.pin }} · 创建：{{ u2.created_at }}</p>
+      <form method="post" action="{{ url_for('admin_reset', uid=u2.id) }}" class="row gap">
+        <button class="btn btn-mini btn-ghost" type="submit">重置密码（随机新 4 位）</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script id="role-data" type="application/json">
+{"team": {{ team_roles|tojson }}, "office": {{ office_roles|tojson }}}
+</script>
+{% endblock %}

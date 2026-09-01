@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}访问密码{% endblock %}
+{% block content %}
+<div class="center-card">
+  <img class="logo-lg" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
+  <h1 class="brand">社区城管巡查</h1>
+  <p class="sub">需要访问密码</p>
+  <form method="post" class="stack">
+    <input type="password" name="password" class="input" placeholder="请输入访问密码" autofocus required>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button class="btn btn-primary" type="submit">进入</button>
+  </form>
+</div>
+{% endblock %}

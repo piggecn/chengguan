@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}新增巡查记录{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('index') }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">新增巡查记录</h1></div>
+</header>
+<form method="post" enctype="multipart/form-data" class="form" data-draft="1">
+  <label>所属中队
+    {% if user.role in ('captain', 'vice-captain', 'member') %}
+    <span class="input readonly">{{ user.unit }}</span>
+    <input type="hidden" name="team" value="{{ user.unit }}">
+    {% else %}
+    <select name="team" class="input" required>
+      <option value="" disabled {{ 'selected' if not old else '' }}>请选择所属中队</option>
+      {% for t in teams %}
+      <option value="{{ t }}" {% if old and old.team == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </label>
+  <label>小区名称
+    <input name="community" class="input" list="community-list" placeholder="请输入小区名称，已录过会自动补全"
+           value="{{ old.community if old else '' }}" required autocomplete="off">
+    <datalist id="community-list"></datalist>
+  </label>
+  <label>问题分类（点选）
+    <span class="chip-grid">
+      {% for c in categories %}
+      <label class="chip">
+        <input type="radio" name="category" value="{{ c }}"
+               {% if old and old.category == c %}checked{% endif %} required>
+        <span>{{ c }}</span>
+      </label>
+      {% endfor %}
+    </span>
+  </label>
+  <label>问题描述
+    <textarea name="description" class="input textarea" rows="4"
+              placeholder="简单描述发现的问题">{{ old.description if old else '' }}</textarea>
+  </label>
+  <label>现场照片（拍照自带时间水印，可多张）
+    <input type="file" name="photos" accept="image/*" multiple capture="environment"
+           class="input file">
+    <span class="muted small" id="photo-hint">未选择照片</span>
+  </label>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button class="btn btn-primary" type="submit">提交</button>
+  <p class="muted small center">弱网提交失败会自动暂存本机，恢复网络后补传</p>
+</form>
+{% endblock %}

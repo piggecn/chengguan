@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}记录详情{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('index') }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">记录详情</h1></div>
+</header>
+
+<div class="card detail">
+  <div class="row between">
+    <b>{{ r.community }} · {{ r.category }}</b>
+    <span class="tag {{ 'tag-closed' if r.status == 'closed' else 'tag-pending' }}">
+      {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
+  </div>
+  <p class="muted">{{ r.team }} · 上报人：{{ r.reporter }}</p>
+  <p class="muted small">发现时间：{{ r.created_at }}{% if r.closed_at %} · 销号：{{ r.closed_at }}{% endif %}</p>
+  <p class="desc">{{ r.description }}</p>
+</div>
+
+<section class="section">
+  <h2>现场照片（{{ before|length }}）</h2>
+  <div class="photo-grid">
+    {% for img in before %}
+    <a href="{{ url_for('uploads', filepath=img.filepath) }}" target="_blank">
+      <img src="{{ url_for('uploads', filepath=img.filepath) }}" alt="现场照片" loading="lazy">
+    </a>
+    {% else %}
+    <p class="muted">无照片</p>
+    {% endfor %}
+  </div>
+</section>
+
+{% if r.status == 'closed' %}
+<section class="section">
+  <h2>处理结果</h2>
+  <p class="desc">{{ r.result }}</p>
+  <h2>整改后照片（{{ after|length }}）</h2>
+  <div class="photo-grid">
+    {% for img in after %}
+    <a href="{{ url_for('uploads', filepath=img.filepath) }}" target="_blank">
+      <img src="{{ url_for('uploads', filepath=img.filepath) }}" alt="整改照片" loading="lazy">
+    </a>
+    {% else %}
+    <p class="muted">无整改照片</p>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<a class="btn btn-warning btn-block" href="{{ url_for('close', rid=r.id) }}">整改销号</a>
+{% endif %}
+{% endblock %}

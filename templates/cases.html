@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}案件登记{% endblock %}
+{% block content %}
+<header class="header">
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">案件登记</h1></div>
+</header>
+
+<div class="tabs page-tabs">
+  <button type="button" class="tab-btn active" data-tab="case-list">案件列表</button>
+  <button type="button" class="tab-btn" data-tab="case-add">登记案件</button>
+</div>
+
+<div id="case-list" class="panel">
+  <form method="get" class="filter-row" onchange="this.submit()">
+    {% if can_all %}
+    <select name="team" class="input">
+      <option value="">全部中队</option>
+      {% for t in teams %}
+      <option value="{{ t }}" {% if sel.team == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <select name="progress" class="input">
+      <option value="">全部进度</option>
+      {% for k, v in progress_labels.items() %}
+      <option value="{{ k }}" {% if sel.progress == k %}selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+    {% if sel.month %}<input type="hidden" name="month" value="{{ sel.month }}">{% endif %}
+  </form>
+  {% if sel.month %}
+  <div class="filter-note">已筛选：{{ sel.month }} · <a href="{{ url_for('cases') }}">清除</a></div>
+  {% endif %}
+  <div class="list">
+    {% for c in rows %}
+    <div class="card case-row">
+      <div class="card-body">
+        <div class="row between">
+          <b class="ellipsis">{{ c.case_name }}</b>
+          <span class="muted small">{{ c.team }}</span>
+        </div>
+        <p class="muted small">{{ c.reporter }} · {{ c.created_at }}</p>
+        <form method="post" action="{{ url_for('case_update', cid=c.id) }}" class="row gap inline-form">
+          <select name="progress" class="input">
+            {% for k, v in progress_labels.items() %}
+            <option value="{{ k }}" {% if c.progress == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+          </select>
+          <input name="fine_amount" class="input" type="number" min="0" step="0.01"
+                 value="{{ c.fine_amount }}">
+          <button class="btn btn-mini btn-primary" type="submit">保存</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <p class="empty">还没有案件，点上方「登记案件」</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="case-add" class="panel hidden">
+  <form method="post" class="card form tight">
+    <label>所属中队
+      {% if user.role in ('captain', 'vice-captain', 'member') %}
+      <span class="input readonly">{{ user.unit }}</span>
+      <input type="hidden" name="team" value="{{ user.unit }}">
+      {% else %}
+      <select name="team" class="input" required>
+        <option value="" disabled selected>请选择所属中队</option>
+        {% for t in teams %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+    </label>
+    <label>案件名称
+      <input name="case_name" class="input" placeholder="如：占用公共空间堆放物料案" required>
+    </label>
+    <div class="row gap">
+      <label>办理进度
+        <select name="progress" class="input">
+          {% for k, v in progress_labels.items() %}
+          <option value="{{ k }}">{{ v }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>罚款金额（元）
+        <input name="fine_amount" class="input" type="number" min="0" step="0.01" value="0">
+      </label>
+    </div>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button class="btn btn-primary" type="submit">登记案件</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block nav %}
+<nav class="tabbar">
+  <a class="tab" href="{{ url_for('index') }}">巡查</a>
+  <a class="tab" href="{{ url_for('complaints') }}">投诉</a>
+  <a class="tab active" href="{{ url_for('cases') }}">案件</a>
+  <a class="tab" href="{{ url_for('stats') }}">统计</a>
+</nav>
+{% endblock %}

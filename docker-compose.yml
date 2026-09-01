@@ -1,0 +1,15 @@
+services:
+  chengguan:
+    build: .
+    container_name: chengguan
+    ports:
+      - "8080:5000"
+    environment:
+      # 可选：留空则免登录；填了之后打开站点要先输这个密码
+      - ACCESS_PASSWORD=
+      # 会话签名密钥，正式使用请改成随机长字符串
+      - SECRET_KEY=please-change-me
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    restart: unless-stopped
