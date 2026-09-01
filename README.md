@@ -26,6 +26,14 @@ docker compose up -d --build
 - 数据都在 `data/`（数据库）和 `uploads/`（照片）两个目录，换容器、升级镜像数据不丢，**备份拷这两个目录即可**
 - 容器异常自动重启（restart: unless-stopped）
 
+## APK 与在线更新
+
+- **APK 不在代码仓库里**（GitHub 公开仓库不放安装包），由 NAS 本地目录分发：
+  1. NAS 建文件夹 `chengguan-updates`，放入 `chengguan.apk` 和 `latest.json` 两个文件
+  2. 容器 `chengguan` 新增存储卷映射：宿主机 `chengguan-updates` 目录 → 容器内 `/app/static/apk`
+  3. 重启容器后，手机 App 自动到 `/static/apk/latest.json` 检查更新，有新版本会提示下载安装
+- 以后 APK 出新版：把新 `chengguan.apk` + `latest.json` 替换进 NAS 文件夹即可，**不用重建容器/镜像**
+
 ## 升级
 
 ```bash
