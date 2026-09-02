@@ -1450,7 +1450,7 @@ def export_ledger_xlsx():
         ws = wb.create_sheet(title="无数据")
         ws["A1"] = "当前范围内没有巡查记录"
         ws["A1"].font = title_font
-    for g in groups:
+    for gi, g in enumerate(groups, 1):
         ws = wb.create_sheet(title=sheet_name(g["community"]))
         ws.merge_cells("A1:I1")
         c = ws.cell(row=1, column=1, value=f"{g['community']}小区摸排情况")
@@ -1478,6 +1478,10 @@ def export_ledger_xlsx():
             r += 1
         if g["before"] or g["after"]:
             r += 1  # 空一行
+            tno = ws.cell(row=r, column=1, value=f"{g['community']}表格序号{gi}")
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+            tno.font = head_font
+            r += 1
             lab = ws.cell(row=r, column=1, value="整改前")
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
             lab2 = ws.cell(row=r, column=6, value="整改后")

@@ -64,6 +64,12 @@
       </tbody>
     </table>
   </div>
+  {% if g.before_thumbs or g.after_thumbs %}
+  <p class="ledger-tableno">{{ g.community }}表格序号{{ loop.index }}</p>
+  <div class="row gap photo-labels">
+    <span class="photo-label">整改前</span><span class="photo-label">整改后</span>
+  </div>
+  {% endif %}
   {% if g.before_thumbs %}
   <p class="muted small">整改前照片（{{ g.before_thumbs|length }} 张，将嵌入 Excel）</p>
   <div class="photo-grid">
