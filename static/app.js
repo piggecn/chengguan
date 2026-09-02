@@ -227,48 +227,17 @@
     });
   });
 
-  // ---------- 账号管理页：单位联动角色 ----------
-  var addUnit = document.getElementById("add-unit");
+  // ---------- 账号管理页：办公室角色显示职务选择 ----------
   var addRole = document.getElementById("add-role");
-  var roleDataEl = document.getElementById("role-data");
-  if (addRole && roleDataEl) {
-    var roleData = JSON.parse(roleDataEl.textContent);
-    var titleField = document.getElementById("title-field");
-    function unitKindOf(unitName) {
-      if (!addUnit) { return "team"; }
-      var opt = addUnit.querySelector('option[value="' + unitName + '"]');
-      return opt ? (opt.dataset.kind || "team") : "team";
-    }
-    function fillRoles(unit) {
-      addRole.innerHTML = '<option value="" disabled selected>请选择角色</option>';
-      var kind = unitKindOf(unit);
-      var opts = (kind === "office") ? roleData.office : roleData.team;
-      opts.forEach(function (p) {
-        var o = document.createElement("option");
-        o.value = p[0];
-        o.textContent = p[1];
-        addRole.appendChild(o);
-      });
-      if (titleField) {
+  var titleField = document.getElementById("title-field");
+  if (addRole && titleField) {
+    addRole.addEventListener("change", function () {
+      if (addRole.value === "office") {
+        titleField.classList.remove("hidden");
+      } else {
         titleField.classList.add("hidden");
       }
-    }
-    if (!addUnit) {
-      // 中队长固定单位
-      var hiddenUnit = document.querySelector('input[name="unit"]');
-      fillRoles(hiddenUnit ? hiddenUnit.value : "");
-    } else {
-      addUnit.addEventListener("change", function () { fillRoles(addUnit.value); });
-    }
-    if (addRole && titleField) {
-      addRole.addEventListener("change", function () {
-        if (addRole.value === "office") {
-          titleField.classList.remove("hidden");
-        } else {
-          titleField.classList.add("hidden");
-        }
-      });
-    }
+    });
   }
 
   // ---------- 小区自动补全 ----------

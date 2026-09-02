@@ -577,13 +577,12 @@ def admin():
 
     return render_template("admin.html", users=items, teams=team_units(),
                            role_labels=ROLE_LABELS, user=u,
-                           add_units=add_units, add_unit_kinds={
-                               n: unit_kind(n) for n in add_units},
+                           add_units=add_units,
+                           add_roles=ADD_ROLES[u["role"]],
+                           unit_suggestions=all_unit_names(),
                            unit_list=get_units(),
                            base_url=get_setting("base_url", ""),
-                           logs=logs,
-                           team_roles=[r for r in ADD_ROLES[u["role"]] if r[0] != "office"],
-                           office_roles=[r for r in ADD_ROLES[u["role"]] if r[0] == "office"])
+                           logs=logs)
 
 
 @app.route("/admin/unit/add", methods=["POST"])
@@ -692,39 +691,35 @@ def admin_settings():
 def admin_add():
     u = admin_access()
     name = (request.form.get("name") or "").strip()
-    unit = request.form.get("unit", "")
-    role = request.form.get("role", "")
+    unit = (request.form.get("unit") or "").strip()
+    role = (request.form.get("role") or "").strip()
+    title = (request.form.get("title") or "").strip()
     if not name:
         flash("姓名不能为空", "error")
         return redirect(url_for("admin"))
+    if not unit:
+        flash("单位不能为空", "error")
+        return redirect(url_for("admin"))
     if u["role"] == "captain":
-        if unit and unit != u["unit"]:
+        if unit != u["unit"]:
             flash("只能给自己中队添加人员", "error")
             return redirect(url_for("admin"))
-        unit = u["unit"]
-    if u["role"] in ("office", "captain") and role not in ("vice-captain", "member"):
-        flash("只能添加副中队长和队员", "error")
-        return redirect(url_for("admin"))
-    title = (request.form.get("title") or "").strip()
-    kind = unit_kind(unit)
-    if u["role"] == "super":
-        if kind == "office":
-            valid = role == "office"
-        elif kind == "team":
-            valid = role in ("captain", "vice-captain", "member")
-        else:
-            valid = False
-    elif u["role"] == "office":
-        valid = kind == "team" and role in ("vice-captain", "member")
-    else:
-        valid = unit == u["unit"] and role in ("vice-captain", "member")
-    if not valid:
-        flash("单位与角色组合不合法", "error")
+    allowed = ["captain", "vice-captain", "member", "office"] if u["role"] == "super"         else ["vice-captain", "member"]
+    if role not in allowed:
+        flash("角色不合法", "error")
         return redirect(url_for("admin"))
     if role == "office" and title not in ("办公室主任", "办公室科员"):
         title = "办公室主任"
     if role != "office":
         title = ""
+    # 手动输入的新单位自动进单位列表（角色是办公室类则标 office，否则按中队）
+    db = get_db()
+    if not db.execute("SELECT 1 FROM units WHERE name=?", (unit,)).fetchone():
+        db.execute(
+            "INSERT INTO units(name, kind, town, sort) VALUES(?,?,?,?)",
+            (unit, "office" if role == "office" else "team", "",
+             len(get_units()) + 1),
+        )
     if get_db().execute(
             "SELECT 1 FROM users WHERE unit=? AND name=?", (unit, name)
     ).fetchone():

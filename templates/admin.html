@@ -36,16 +36,18 @@
     <input type="hidden" name="unit" value="{{ add_units[0] }}">
   </label>
   {% else %}
-  <label>单位
-    <select name="unit" id="add-unit" class="input" required>
-      <option value="" disabled selected>请选择单位</option>
-      {% for t in add_units %}<option value="{{ t }}" data-kind="{{ add_unit_kinds.get(t, '') }}">{{ t }}</option>{% endfor %}
-    </select>
+  <label>单位（手动输入，已建过的可自动补全）
+    <input name="unit" id="add-unit" class="input" list="unit-suggestions"
+           placeholder="如：鄱阳镇社区一中队 / 综合办公室" required autocomplete="off">
+    <datalist id="unit-suggestions">
+      {% for t in unit_suggestions %}<option value="{{ t }}">{% endfor %}
+    </datalist>
   </label>
   {% endif %}
   <label>角色
     <select name="role" id="add-role" class="input" required>
       <option value="" disabled selected>请选择角色</option>
+      {% for rv, rl in add_roles %}<option value="{{ rv }}">{{ rl }}</option>{% endfor %}
     </select>
   </label>
   <label id="title-field" class="hidden">办公室职务
@@ -136,7 +138,4 @@
 </div>
 {% endif %}
 
-<script id="role-data" type="application/json">
-{"team": {{ team_roles|tojson }}, "office": {{ office_roles|tojson }}}
-</script>
 {% endblock %}
