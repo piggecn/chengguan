@@ -1453,21 +1453,19 @@ def export_ledger_xlsx():
             return base + "_x"
 
         def embed_photo(filepath, w, h):
-            """裁切填满 w×h px 的照片区（保持比例居中裁切），返回 XLImage。"""
+            """等比缩放完整显示：贴到 w×h 白底画布（与照片区同比例），
+            单元格拉伸填满时不变形、不裁切，效果同 WPS 图片嵌入单元格。"""
             p = UPLOADS_DIR / filepath
             if not p.exists():
                 return None
             try:
                 im = PILImage.open(p).convert("RGB")
-                sw, sh = im.size
-                scale = max(w / sw, h / sh)
-                nw, nh = int(sw * scale + 0.5), int(sh * scale + 0.5)
-                im = im.resize((nw, nh))
-                left = (nw - w) // 2
-                top = (nh - h) // 2
-                im = im.crop((left, top, left + w, top + h))
+                canvas = PILImage.new("RGB", (w, h), (255, 255, 255))
+                im.thumbnail((w, h))
+                ow, oh = im.size
+                canvas.paste(im, ((w - ow) // 2, (h - oh) // 2))
                 buf = io.BytesIO()
-                im.save(buf, "JPEG", quality=85)
+                canvas.save(buf, "JPEG", quality=90)
                 buf.seek(0)
                 return XLImage(buf)
             except Exception:
@@ -1555,8 +1553,10 @@ def export_ledger_xlsx():
                 ws.row_dimensions[r].height = 45
                 r += 1
                 # 照片行（行高 368.5，左前右后对照，仿原表第 14 行）：
-                # 用两格锚点嵌入单元格区（A:D 整改前 / F:I 整改后），随表格移动缩放
+                # 原表整改前下方合并 A:D、整改后下方合并 F:I，图片嵌入该单元格区
                 for i in range(max(len(g["before"]), len(g["after"]))):
+                    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+                    ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
                     if i < len(g["before"]):
                         cell_image(ws, g["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
                     if i < len(g["after"]):
