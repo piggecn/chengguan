@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}小区摸排台账导出{% endblock %}
+{% block content %}
+<header class="header">
+  <a class="back" href="{{ url_for('index') }}">← 返回</a>
+  <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">小区摸排台账导出</h1></div>
+</header>
+
+{% with msgs = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in msgs %}
+  <div class="banner {{ 'banner-ok' if cat == 'ok' else '' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+<form method="post" action="{{ url_for('ledger_settings', start=start, end=end) }}" class="card form tight">
+  <p class="muted small">表头固定列（改一次自动记住，下次导出沿用）</p>
+  <label>问题上报部门
+    <input name="ledger_report_dept" class="input" value="{{ deps.ledger_report_dept }}">
+  </label>
+  <label>牵头部门
+    <input name="ledger_lead_dept" class="input" value="{{ deps.ledger_lead_dept }}">
+  </label>
+  <label>配合部门
+    <input name="ledger_assist_dept" class="input" value="{{ deps.ledger_assist_dept }}">
+  </label>
+  <button class="btn btn-mini btn-primary" type="submit">保存表头设置</button>
+</form>
+
+<div class="card form tight">
+  <label class="export-label">时间段（可选，留空导出全部）</label>
+  <form method="get" action="{{ url_for('export_ledger') }}" class="row gap export-fields">
+    <input type="date" name="start" class="input export-date" value="{{ start }}">
+    <span class="muted">至</span>
+    <input type="date" name="end" class="input export-date" value="{{ end }}">
+    <button class="btn btn-mini btn-primary" type="submit">刷新预览</button>
+  </form>
+  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end) }}">下载 Excel（小区摸排台账）</a>
+</div>
+
+<p class="muted small center">共 {{ groups|length }} 个小区 · 下面即导出样式，Excel 每小区一个工作表，照片会嵌在表尾</p>
+
+{% for g in groups %}
+<section class="section">
+  <div class="ledger-title">{{ g.community }}小区摸排情况</div>
+  <div class="table-wrap">
+    <table class="table ledger-table">
+      <thead>
+        <tr><th>序号</th><th>问题上报部门</th><th>牵头部门</th><th>配合部门</th><th>问题描述</th><th>整改举措</th><th>整改时限</th><th>整改情况</th><th>备注</th></tr>
+      </thead>
+      <tbody>
+        {% for num, r in g.rows %}
+        <tr>
+          <td class="center">{{ num }}</td>
+          <td>{{ deps.ledger_report_dept }}</td>
+          <td>{{ deps.ledger_lead_dept }}</td>
+          <td>{{ deps.ledger_assist_dept }}</td>
+          <td>{{ r.description or r.category }}</td>
+          <td>{{ r.result or '' }}</td>
+          <td>{{ r.deadline or '' }}</td>
+          <td>{{ '已整改' if r.status == 'closed' else '未整改' }}</td>
+          <td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if g.before_thumbs %}
+  <p class="muted small">整改前照片（{{ g.before_thumbs|length }} 张，将嵌入 Excel）</p>
+  <div class="photo-grid">
+    {% for t in g.before_thumbs %}
+    <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
+      <img src="{{ url_for('uploads', filepath=t) }}" alt="整改前" loading="lazy">
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if g.after_thumbs %}
+  <p class="muted small">整改后照片（{{ g.after_thumbs|length }} 张，将嵌入 Excel）</p>
+  <div class="photo-grid">
+    {% for t in g.after_thumbs %}
+    <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
+      <img src="{{ url_for('uploads', filepath=t) }}" alt="整改后" loading="lazy">
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% else %}
+<p class="empty">当前范围内没有巡查记录</p>
+{% endfor %}
+{% endblock %}

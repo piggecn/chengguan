@@ -5,6 +5,7 @@
 """
 import io
 import os
+import re
 import secrets
 import sqlite3
 import uuid
@@ -131,6 +132,7 @@ def init_db():
             description TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             result TEXT DEFAULT '',
+            deadline TEXT NOT NULL DEFAULT '',
             reporter TEXT NOT NULL,
             created_at TEXT NOT NULL,
             closed_at TEXT
@@ -181,6 +183,11 @@ def init_db():
             created_at TEXT NOT NULL
         );
         """)
+        # 旧库迁移：records 缺 deadline 列时补上（整改期限）
+        cols = [r[1] for r in db.execute("PRAGMA table_info(records)").fetchall()]
+        if "deadline" not in cols:
+            db.execute("ALTER TABLE records ADD COLUMN deadline TEXT NOT NULL DEFAULT ''")
+            print("[migrate] records 增加 deadline 列")
         cur = db.execute("SELECT COUNT(*) c FROM users")
         if cur.fetchone()["c"] == 0:
             db.execute(
@@ -649,6 +656,7 @@ def create():
         community = (request.form.get("community") or "").strip()
         category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
+        deadline = (request.form.get("deadline") or "").strip()
         if team not in TEAMS:
             return render_template("create.html", error="请选择所属中队",
                                    teams=TEAMS, categories=CATEGORIES,
@@ -657,8 +665,8 @@ def create():
         db = get_db()
         cur = db.execute(
             "INSERT INTO records(team, community, category, description, "
-            "status, reporter, created_at) VALUES(?,?,?,?,?,?,?)",
-            (team, community, category, description, "pending",
+            "status, deadline, reporter, created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (team, community, category, description, "pending", deadline,
              u["name"], now()),
         )
         rid = cur.lastrowid
@@ -710,14 +718,15 @@ def edit_record(rid):
         community = (request.form.get("community") or "").strip()
         category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
+        deadline = (request.form.get("deadline") or "").strip()
         if team not in TEAMS:
             return render_template("edit.html", r=r, teams=TEAMS,
                                    categories=CATEGORIES, user=u,
                                    error="请选择所属中队"), 400
         get_db().execute(
-            "UPDATE records SET team=?, community=?, category=?, description=? "
-            "WHERE id=?",
-            (team, community, category, description, rid),
+            "UPDATE records SET team=?, community=?, category=?, description=?, "
+            "deadline=? WHERE id=?",
+            (team, community, category, description, deadline, rid),
         )
         get_db().commit()
         log_action("编辑巡查记录", f"记录#{rid} {community or '未填小区'} · {category}")
@@ -772,6 +781,7 @@ def close(rid):
         result = (request.form.get("result") or "").strip()
         if not result:
             return render_template("close.html", r=r, error="处理结果要填")
+        deadline = (request.form.get("deadline") or "").strip() or r["deadline"]
         db = get_db()
         saved = save_photos(request.files.getlist("photos"),
                             f"records/{rid}/after")
@@ -781,8 +791,8 @@ def close(rid):
             [(rid, "after", p[0], now()) for p in saved],
         )
         db.execute(
-            "UPDATE records SET status='closed', result=?, closed_at=? "
-            "WHERE id=?", (result, now(), rid),
+            "UPDATE records SET status='closed', result=?, closed_at=?, "
+            "deadline=? WHERE id=?", (result, now(), deadline, rid),
         )
         db.commit()
         log_action("整改销号", f"记录#{rid} {r['community'] or '未填小区'} · {r['category']}")
@@ -1309,6 +1319,194 @@ def export_doc():
     fname = f"巡查台账_{rng}.docx".replace("/", "-")
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+# ---------- 小区摸排台账导出（预览页 + Excel） ----------
+LEDGER_DEPS = [
+    ("ledger_report_dept", "问题上报部门", "县城管局"),
+    ("ledger_lead_dept", "牵头部门", "县城市管理综合行政执法大队"),
+    ("ledger_assist_dept", "配合部门", "社区、物业"),
+]
+
+
+def _ledger_groups():
+    """摸排台账数据：按小区分组，每小区返回序号共用行 + 整改前/后照片路径。"""
+    where, params, start, end, month = _export_filters()
+    sql = "SELECT * FROM records"
+    if where:
+        sql += " WHERE " + where
+    records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
+    order = {c: i for i, c in enumerate(CATEGORIES)}
+    by_comm = {}
+    for r in records:
+        by_comm.setdefault(r["community"] or "未填小区", []).append(r)
+    groups = []
+    for comm in sorted(by_comm):
+        recs = sorted(by_comm[comm],
+                      key=lambda r: (order.get(r["category"], 99), r["id"]))
+        rows = []
+        num, last_cat = 0, None
+        before, after = [], []
+        for r in recs:
+            if r["category"] != last_cat:
+                num += 1
+                last_cat = r["category"]
+            rows.append((num, r))
+            for im in get_db().execute(
+                "SELECT * FROM images WHERE record_id=? ORDER BY id",
+                (r["id"],),
+            ).fetchall():
+                (before if im["type"] == "before" else after).append(
+                    im["filepath"])
+        groups.append({
+            "community": comm, "rows": rows,
+            "before": before, "after": after,
+            "before_thumbs": [thumb_of(p) for p in before],
+            "after_thumbs": [thumb_of(p) for p in after],
+        })
+    return groups, start, end
+
+
+@app.route("/export/ledger")
+@require_user
+def export_ledger():
+    groups, start, end = _ledger_groups()
+    deps = {k: get_setting(k, d) or d for k, _l, d in LEDGER_DEPS}
+    return render_template("ledger.html", groups=groups, deps=deps,
+                           start=start, end=end, user=current_user())
+
+
+@app.route("/export/ledger/settings", methods=["POST"])
+@require_user
+def ledger_settings():
+    vals = []
+    for key, _label, default in LEDGER_DEPS:
+        val = (request.form.get(key) or "").strip() or default
+        set_setting(key, val)
+        vals.append(val)
+    log_action("修改摸排台账表头", " / ".join(vals))
+    flash("台账表头已保存", "ok")
+    return redirect(url_for(
+        "export_ledger",
+        start=request.args.get("start", ""), end=request.args.get("end", "")))
+
+
+@app.route("/export/ledger.xlsx")
+@require_user
+def export_ledger_xlsx():
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, Side
+    from openpyxl.drawing.image import Image as XLImage
+    from PIL import Image as PILImage
+
+    groups, start, end = _ledger_groups()
+    deps = [get_setting(k, d) or d for k, _l, d in LEDGER_DEPS]
+    thin = Side(style="thin")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    title_font = Font(name="黑体", size=16)
+    head_font = Font(name="黑体", size=11)
+
+    headers = ["序号", "问题上报部门", "牵头部门", "配合部门",
+               "问题描述", "整改举措", "整改时限", "整改情况", "备注"]
+    widths = [7.4, 14.6, 21.1, 14.4, 20.8, 21.1, 14.6, 13.1, 9.1]
+
+    def sheet_name(name):
+        base = re.sub(r"[\[\]:*?/\\]", "", name)[:31] or "小区"
+        if base not in used:
+            used.add(base)
+            return base
+        for i in range(2, 100):
+            cand = f"{base[:29]}{i}"
+            if cand not in used:
+                used.add(cand)
+                return cand
+        return base + "_x"
+
+    def embed_photo(filepath, target_w=380):
+        p = UPLOADS_DIR / filepath
+        if not p.exists():
+            return None
+        try:
+            im = PILImage.open(p)
+            w, h = im.size
+            if w > target_w:
+                h = int(h * target_w / w)
+                im = im.resize((target_w, h))
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, "JPEG", quality=85)
+            buf.seek(0)
+            img = XLImage(buf)
+            img.width, img.height = im.size
+            return img
+        except Exception:
+            return None
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    used = set()
+    if not groups:  # 无数据时也要有一张可见表，否则保存报错
+        ws = wb.create_sheet(title="无数据")
+        ws["A1"] = "当前范围内没有巡查记录"
+        ws["A1"].font = title_font
+    for g in groups:
+        ws = wb.create_sheet(title=sheet_name(g["community"]))
+        ws.merge_cells("A1:I1")
+        c = ws.cell(row=1, column=1, value=f"{g['community']}小区摸排情况")
+        c.font = title_font
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 30
+        for col, (h, w) in enumerate(zip(headers, widths), 1):
+            cell = ws.cell(row=2, column=col, value=h)
+            cell.font = head_font
+            cell.border = border
+            cell.alignment = center
+            ws.column_dimensions[cell.column_letter].width = w
+        r = 3
+        for num, rec in g["rows"]:
+            vals = [num, deps[0], deps[1], deps[2],
+                    rec["description"] or rec["category"],
+                    rec["result"] or "",
+                    rec["deadline"] or "",
+                    "已整改" if rec["status"] == "closed" else "未整改",
+                    ""]
+            for col, v in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=col, value=v)
+                cell.border = border
+                cell.alignment = left if col in (5, 6) else center
+            r += 1
+        if g["before"] or g["after"]:
+            r += 1  # 空一行
+            lab = ws.cell(row=r, column=1, value="整改前")
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+            lab2 = ws.cell(row=r, column=6, value="整改后")
+            ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
+            lab.font = lab2.font = head_font
+            lab.alignment = lab2.alignment = center
+            r += 1
+            for i in range(max(len(g["before"]), len(g["after"]))):
+                hmax = 0
+                if i < len(g["before"]):
+                    img = embed_photo(g["before"][i])
+                    if img:
+                        ws.add_image(img, f"A{r}")
+                        hmax = max(hmax, img.height * 0.75)
+                if i < len(g["after"]):
+                    img = embed_photo(g["after"][i])
+                    if img:
+                        ws.add_image(img, f"F{r}")
+                        hmax = max(hmax, img.height * 0.75)
+                ws.row_dimensions[r].height = max(hmax + 6, 30)
+                r += 1
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    rng = f"{start}_to_{end}" if start or end else "全部"
+    fname = f"小区摸排台账_{rng}.xlsx".replace("/", "-")
+    log_action("导出摸排台账", f"{rng} · {len(groups)} 个小区")
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 # ---------- 数据一键备份（主管理员） ----------

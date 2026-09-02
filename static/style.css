@@ -160,6 +160,17 @@ label .input { margin-top: 4px; }
 .table th { background: var(--primary-bg); color: #1557b0; text-align: left; padding: 8px 10px; }
 .table td { padding: 8px 10px; border-bottom: 1px solid #eee; }
 
+/* 摸排台账预览 */
+.ledger-title {
+  font-family: "SimHei", "黑体", sans-serif; font-size: 18px; font-weight: 600;
+  text-align: center; margin-bottom: 10px;
+}
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; }
+.ledger-table { min-width: 720px; font-size: 13px; }
+.ledger-table th, .ledger-table td { border: 1px solid #e3e8ef; }
+.ledger-table td.center { text-align: center; }
+
+
 /* 待上传横幅 */
 .banner {
   margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px;

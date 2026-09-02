@@ -39,6 +39,10 @@
     <textarea name="description" class="input textarea" rows="4"
               placeholder="简单描述发现的问题">{{ old.description if old else '' }}</textarea>
   </label>
+  <label>整改期限（可选，用于摸排台账「整改时限」列）
+    <input type="date" name="deadline" class="input"
+           value="{{ old.deadline if old else '' }}">
+  </label>
   <label>现场照片（拍照自带时间水印，可多张）
     <input type="file" name="photos" accept="image/*" multiple capture="environment"
            class="input file" id="photo-input">

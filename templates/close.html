@@ -10,6 +10,9 @@
     <textarea name="result" class="input textarea" rows="4"
               placeholder="如：已拆除违建围栏，恢复公共区域" required></textarea>
   </label>
+  <label>整改期限（可选，整改到位日期）
+    <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
+  </label>
   <label>整改后照片（可多张）
     <input type="file" name="photos" accept="image/*" multiple capture="environment"
            class="input file" id="photo-input">

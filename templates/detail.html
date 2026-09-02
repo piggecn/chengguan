@@ -13,7 +13,7 @@
       {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
   </div>
   <p class="muted">{{ r.team }} · 上报人：{{ r.reporter }}</p>
-  <p class="muted small">发现时间：{{ r.created_at }}{% if r.closed_at %} · 销号：{{ r.closed_at }}{% endif %}</p>
+  <p class="muted small">发现时间：{{ r.created_at }}{% if r.closed_at %} · 销号：{{ r.closed_at }}{% endif %}{% if r.deadline %} · 整改期限：{{ r.deadline }}{% endif %}</p>
   <p class="desc">{{ r.description }}</p>
   <div class="row gap detail-actions">
     <a class="btn btn-mini btn-ghost" href="{{ url_for('edit_record', rid=r.id) }}">编辑</a>

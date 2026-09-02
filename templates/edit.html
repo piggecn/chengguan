@@ -36,6 +36,9 @@
   <label>问题描述（可不填）
     <textarea name="description" class="input textarea" rows="4">{{ r.description }}</textarea>
   </label>
+  <label>整改期限（可选）
+    <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
+  </label>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn btn-primary" type="submit">保存修改</button>
 </form>
