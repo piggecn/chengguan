@@ -12,3 +12,5 @@ android/build/
 
 # APK 更新包不进 git：由 NAS 挂载目录分发（整目录 static/apk）
 static/apk/
+*.idsig
+_testdata/

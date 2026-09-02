@@ -118,7 +118,7 @@
   </div>
   <div class="row gap photo-cols">
     <div class="photo-col">
-      {% for t in blk.before_thumbs %}
+      {% for t in blk.before %}
       <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
         <img src="{{ url_for('uploads', filepath=t) }}" alt="整改前" loading="lazy">
       </a>
@@ -127,7 +127,7 @@
       {% endfor %}
     </div>
     <div class="photo-col">
-      {% for t in blk.after_thumbs %}
+      {% for t in blk.after %}
       <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
         <img src="{{ url_for('uploads', filepath=t) }}" alt="整改后" loading="lazy">
       </a>
