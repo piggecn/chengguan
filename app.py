@@ -490,8 +490,9 @@ def personnel():
             session.permanent = True
             session["uid"] = u["id"]
             return redirect(url_for("index"))
-        return render_template("personnel.html", error="单位、姓名或密码不对",
-                               units=login_units())
+        # 登录失败走 PRG：重定向到干净地址，避免分享链接带参循环自动提交
+        flash("单位、姓名或密码不对，请重新输入", "error")
+        return redirect(url_for("personnel"))
     return render_template("personnel.html", error=None, units=login_units())
 
 

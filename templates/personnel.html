@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}登录{% endblock %}
 {% block content %}
+{% with msgs = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in msgs %}
+  <div class="banner {{ '' if cat == 'ok' else 'banner-error' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
 <div class="center-card">
   <img class="logo-lg" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
   <h1 class="brand">社区城管巡查</h1>
@@ -18,13 +23,13 @@
     </select>
     <div class="pin-wrap">
       <input type="password" inputmode="numeric" pattern="[0-9]" maxlength="1"
-             class="pin-box" aria-label="密码第1位">
+             class="pin-box" autocomplete="one-time-code" aria-label="密码第1位">
       <input type="password" inputmode="numeric" pattern="[0-9]" maxlength="1"
-             class="pin-box" aria-label="密码第2位">
+             class="pin-box" autocomplete="one-time-code" aria-label="密码第2位">
       <input type="password" inputmode="numeric" pattern="[0-9]" maxlength="1"
-             class="pin-box" aria-label="密码第3位">
+             class="pin-box" autocomplete="one-time-code" aria-label="密码第3位">
       <input type="password" inputmode="numeric" pattern="[0-9]" maxlength="1"
-             class="pin-box" aria-label="密码第4位">
+             class="pin-box" autocomplete="one-time-code" aria-label="密码第4位">
       <input type="hidden" name="pin" id="pin">
     </div>
     <p class="muted small center">③ 输入 4 位密码</p>

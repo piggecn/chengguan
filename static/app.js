@@ -79,16 +79,17 @@
       loadNames(unitSel.value);
     });
 
-    // 四格密码：自动跳格、退格回跳、输满 4 位自动登录
+    // 四格密码：自动跳格、退格回跳；只有真实键盘输入（非浏览器自动填充）才自动登录
     var boxes = loginBoxes;
     var form = loginForm;
     boxes.forEach(function (box, idx) {
-      box.addEventListener("input", function () {
+      box.addEventListener("input", function (e) {
+        var manual = (e && (e.inputType === "insertText" || e.inputType === "insertFromPaste"));
         box.value = box.value.replace(/\D/g, "").slice(0, 1);
         if (box.value && idx < boxes.length - 1) {
           boxes[idx + 1].focus();
         }
-        if (idx === boxes.length - 1) {
+        if (idx === boxes.length - 1 && manual) {
           var all = true;
           boxes.forEach(function (b) { if (!b.value) all = false; });
           if (all) {
@@ -98,7 +99,7 @@
             try {
               localStorage.setItem("cg-unit", unitSel.value);
               localStorage.setItem("cg-name", nameSel.value);
-            } catch (e) { /* ignore */ }
+            } catch (e2) { /* ignore */ }
             form.submit();
           }
         }
