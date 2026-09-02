@@ -21,7 +21,7 @@
     <span class="avatar">{{ user.name[0] }}</span>
     <div class="am-info">
       <b>{{ user.name }}</b>
-      <span class="muted small">{{ role_labels.get(user.role, user.role) }}{% if user.unit %} · {{ user.unit }}{% endif %}</span>
+      <span class="muted small">{% if role_labels.get(user.role, user.role) != user.name %}{{ role_labels.get(user.role, user.role) }} · {% endif %}{% if user.unit %}{{ user.unit }}{% else %}单位管理员{% endif %}</span>
     </div>
   </div>
   <a href="{{ url_for('password') }}">修改密码</a>
@@ -48,7 +48,7 @@
     <div class="tn-account">
       <button type="button" class="tn-avatar" id="account-btn-d" aria-label="账户">
         <span class="avatar">{{ user.name[0] }}</span>
-        <span class="tn-name">{{ user.name }} · {{ role_labels.get(user.role, user.role) }}</span>
+        <span class="tn-name">{{ user.name }}{% if role_labels.get(user.role, user.role) != user.name %} · {{ role_labels.get(user.role, user.role) }}{% endif %}</span>
         <span class="tn-caret">▾</span>
       </button>
       {{ account_menu('account-menu-d') }}

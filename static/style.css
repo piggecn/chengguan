@@ -359,6 +359,7 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
 
 
 /* ---------- 账户组件 ---------- */
+.topnav { display: none; }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%;
   background: var(--primary); color: #fff;
@@ -426,9 +427,11 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
 
 /* ---------- 桌面端适配 ---------- */
 @media (min-width: 768px) {
-  body { padding-top: 56px; }
+  body { padding-top: 0; }
+  body:has(.topnav) { padding-top: 56px; }
   .topnav {
-    position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 100;
+    display: block; position: fixed; top: 0; left: 0; right: 0;
+    height: 56px; z-index: 100;
     background: #fff; border-bottom: 1px solid var(--border);
     box-shadow: 0 1px 4px rgba(0,0,0,.05);
   }
@@ -457,7 +460,18 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
   .header.mobile-only { display: none; }
   .tabbar { display: none; }
   .fab { display: none; }
-  .stat-row { max-width: 1100px; margin: 0 auto; }
+  .stat-row {
+    max-width: 1100px; margin: 12px auto 0; padding: 0; gap: 12px;
+    background: transparent; border-bottom: none;
+  }
+  .stat-row .stat {
+    border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    padding: 14px 8px;
+  }
+  .filter-form {
+    max-width: 1100px; margin: 12px auto 0;
+    border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
   .banner, .filter-note { max-width: 1100px; margin-left: auto; margin-right: auto; }
 
   /* 筛选：面板常开、工具栏横排 */
