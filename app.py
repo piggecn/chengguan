@@ -1409,6 +1409,7 @@ def export_ledger_xlsx():
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
     from openpyxl.worksheet.pagebreak import Break
     from PIL import Image as PILImage
 
@@ -1431,6 +1432,10 @@ def export_ledger_xlsx():
     headers = ["序号", "问题上报部门", "牵头部门", "配合部门",
                "问题描述", "整改举措", "整改时限", "整改情况", "备注"]
     widths = [7.375, 14.625, 21.125, 14.375, 20.75, 21.125, 14.625, 13.125, 9.125]
+    # 照片区尺寸（px，按原表 8px/字符宽）：整改前占 A:D、整改后占 F:I，行高 368.5pt
+    BEFORE_W = int(sum(widths[0:4]) * 8)
+    AFTER_W = int(sum(widths[5:9]) * 8)
+    PHOTO_H = int(368.5 * 96 / 72)
 
     def build_workbook(groups):
         used = set()
@@ -1447,22 +1452,39 @@ def export_ledger_xlsx():
                     return cand
             return base + "_x"
 
-        def embed_photo(filepath, box_w=400, box_h=490):
-            """照片按原表照片区（约 400×490px，行高368.5pt）等比缩放入盒。"""
+        def embed_photo(filepath, w, h):
+            """裁切填满 w×h px 的照片区（保持比例居中裁切），返回 XLImage。"""
             p = UPLOADS_DIR / filepath
             if not p.exists():
                 return None
             try:
-                im = PILImage.open(p)
-                im.thumbnail((box_w, box_h))
+                im = PILImage.open(p).convert("RGB")
+                sw, sh = im.size
+                scale = max(w / sw, h / sh)
+                nw, nh = int(sw * scale + 0.5), int(sh * scale + 0.5)
+                im = im.resize((nw, nh))
+                left = (nw - w) // 2
+                top = (nh - h) // 2
+                im = im.crop((left, top, left + w, top + h))
                 buf = io.BytesIO()
-                im.convert("RGB").save(buf, "JPEG", quality=85)
+                im.save(buf, "JPEG", quality=85)
                 buf.seek(0)
-                img = XLImage(buf)
-                img.width, img.height = im.size
-                return img
+                return XLImage(buf)
             except Exception:
                 return None
+
+        def cell_image(ws_, filepath, w, h, row1, col0, col1):
+            """把照片嵌入表格单元格区（from A{r} 到 D{r+1}），随表格移动缩放。"""
+            img = embed_photo(filepath, w, h)
+            if not img:
+                return False
+            img.anchor = TwoCellAnchor(
+                editAs="twoCell",
+                _from=AnchorMarker(col=col0, row=row1 - 1),
+                to=AnchorMarker(col=col1, row=row1),
+            )
+            ws_.add_image(img)
+            return True
 
         wb = Workbook()
         wb.remove(wb.active)
@@ -1532,16 +1554,13 @@ def export_ledger_xlsx():
                 lab.alignment = lab2.alignment = center
                 ws.row_dimensions[r].height = 45
                 r += 1
-                # 照片行（行高 368.5，左前右后对照，仿原表第 14 行）
+                # 照片行（行高 368.5，左前右后对照，仿原表第 14 行）：
+                # 用两格锚点嵌入单元格区（A:D 整改前 / F:I 整改后），随表格移动缩放
                 for i in range(max(len(g["before"]), len(g["after"]))):
                     if i < len(g["before"]):
-                        img = embed_photo(g["before"][i])
-                        if img:
-                            ws.add_image(img, f"A{r}")
+                        cell_image(ws, g["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
                     if i < len(g["after"]):
-                        img = embed_photo(g["after"][i])
-                        if img:
-                            ws.add_image(img, f"F{r}")
+                        cell_image(ws, g["after"][i], AFTER_W, PHOTO_H, r, 5, 9)
                     ws.row_dimensions[r].height = 368.5
                     r += 1
             # 分页符：表格区之后断一页、照片区之后再断一页（仿原表第 11、14 行处断开）
