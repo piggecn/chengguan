@@ -6,6 +6,8 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">记录详情</h1></div>
 </header>
 
+<div class="detail-grid">
+<div class="detail-info">
 <div class="card detail">
   <div class="row between">
     <b>{{ r.community or '未填小区' }} · {{ r.category }}</b>
@@ -27,7 +29,9 @@
     </form>
   </div>
 </div>
+</div>
 
+<div class="detail-photos">
 <section class="section">
   <h2>现场照片（{{ before|length }}）</h2>
   <div class="photo-grid">
@@ -59,4 +63,6 @@
 {% else %}
 <a class="btn btn-warning btn-block" href="{{ url_for('close', rid=r.id) }}">整改销号</a>
 {% endif %}
+</div>
+</div>
 {% endblock %}

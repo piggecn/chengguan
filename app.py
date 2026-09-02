@@ -135,6 +135,14 @@ def log_action(action, detail):
 
 
 app = Flask(__name__)
+
+
+@app.context_processor
+def inject_globals():
+    """所有模板可用：user（当前用户或 None）、role_labels。"""
+    return {"user": current_user(), "role_labels": ROLE_LABELS}
+
+
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "chengguan-local-dev-secret")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=180)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 单次上传上限 100MB

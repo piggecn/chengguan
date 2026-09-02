@@ -14,6 +14,53 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+{% if user %}
+{% macro account_menu(id) %}
+<div class="account-menu hidden" id="{{ id }}">
+  <div class="am-head">
+    <span class="avatar">{{ user.name[0] }}</span>
+    <div class="am-info">
+      <b>{{ user.name }}</b>
+      <span class="muted small">{{ role_labels.get(user.role, user.role) }}{% if user.unit %} · {{ user.unit }}{% endif %}</span>
+    </div>
+  </div>
+  <a href="{{ url_for('password') }}">修改密码</a>
+  {% if user.role in ('super', 'office', 'captain') %}
+  <a href="{{ url_for('admin') }}">账号管理</a>
+  {% endif %}
+  <a href="{{ url_for('logout') }}">退出登录</a>
+</div>
+{% endmacro %}
+{# 桌面端顶部导航（≥768px 显示） #}
+<nav class="topnav">
+  <div class="topnav-inner">
+    <a class="tn-brand" href="{{ url_for('index') }}">
+      <img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
+      <span>社区城管巡查</span>
+    </a>
+    <div class="tn-links">
+      <a class="{{ 'active' if request.endpoint == 'index' }}" href="{{ url_for('index') }}">巡查</a>
+      <a class="{{ 'active' if request.endpoint in ('cases', 'case_edit') }}" href="{{ url_for('cases') }}">案件</a>
+      <a class="{{ 'active' if request.endpoint == 'stats' }}" href="{{ url_for('stats') }}">统计</a>
+      <a class="{{ 'active' if request.endpoint in ('export_ledger', 'export_ledger_xlsx') }}"
+         href="{{ url_for('export_ledger') }}">台账导出</a>
+    </div>
+    <div class="tn-account">
+      <button type="button" class="tn-avatar" id="account-btn-d" aria-label="账户">
+        <span class="avatar">{{ user.name[0] }}</span>
+        <span class="tn-name">{{ user.name }} · {{ role_labels.get(user.role, user.role) }}</span>
+        <span class="tn-caret">▾</span>
+      </button>
+      {{ account_menu('account-menu-d') }}
+    </div>
+  </div>
+</nav>
+{# 手机端右上角头像（<768px 显示） #}
+<button type="button" class="mobile-account" id="account-btn-m" aria-label="账户">
+  <span class="avatar">{{ user.name[0] }}</span>
+</button>
+{{ account_menu('account-menu-m') }}
+{% endif %}
 <div class="page">
 {% block content %}{% endblock %}
 </div>

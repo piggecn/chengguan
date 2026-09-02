@@ -140,7 +140,7 @@
   var exportToggle = document.getElementById("export-toggle");
   var exportPanel = document.getElementById("export-panel");
   var exportHint = document.getElementById("export-hint");
-  var filterForm = document.querySelector("form.filter-row");
+  var filterForm = document.querySelector("form.filter-form") || document.querySelector("form.filter-row");
   function buildExportUrl(path) {
     var params = new URLSearchParams();
     ["team", "category", "reporter", "status"].forEach(function (k) {
@@ -166,6 +166,41 @@
       window.location.href = buildExportUrl("/export");
     });
   }
+
+  // ---------- 首页：筛选/导出折叠面板 ----------
+  var filterToggle = document.getElementById("filter-toggle");
+  var filterPanel = document.getElementById("filter-panel");
+  var filterToggleLabel = document.getElementById("filter-toggle-label");
+  if (filterToggle && filterPanel) {
+    filterToggle.addEventListener("click", function () {
+      var hidden = filterPanel.classList.toggle("hidden");
+      if (filterToggleLabel) {
+        filterToggleLabel.textContent = hidden ? "筛选 / 导出" : "收起";
+      }
+    });
+  }
+
+  // ---------- 账户菜单（手机头像 + 桌面顶栏） ----------
+  var accBtnD = document.getElementById("account-btn-d");
+  var accBtnM = document.getElementById("account-btn-m");
+  var accMenuD = document.getElementById("account-menu-d");
+  var accMenuM = document.getElementById("account-menu-m");
+  function toggleMenu(btn, menu) {
+    if (!btn || !menu) { return; }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var willOpen = menu.classList.contains("hidden");
+      if (accMenuD) { accMenuD.classList.add("hidden"); }
+      if (accMenuM) { accMenuM.classList.add("hidden"); }
+      if (willOpen) { menu.classList.remove("hidden"); }
+    });
+  }
+  toggleMenu(accBtnD, accMenuD);
+  toggleMenu(accBtnM, accMenuM);
+  document.addEventListener("click", function () {
+    if (accMenuD) { accMenuD.classList.add("hidden"); }
+    if (accMenuM) { accMenuM.classList.add("hidden"); }
+  });
 
   // ---------- 账号管理页：复制登录链接（服务端已按配置域名生成，打开即自动登录） ----------
   document.querySelectorAll(".share-btn").forEach(function (btn) {

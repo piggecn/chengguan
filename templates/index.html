@@ -1,25 +1,10 @@
 {% extends "base.html" %}
 {% block title %}巡查记录{% endblock %}
 {% block content %}
-<header class="header">
-  <div class="row between">
-    <div class="row gap title-row">
-      <img class="logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
-      <div>
-        <h1 class="title">社区城管巡查</h1>
-        <p class="sub account-chip">{{ user.name }}{% if role_labels.get(user.role, user.role) != user.name %}（{{ role_labels.get(user.role, user.role) }}）{% endif %} · {{ user.unit }} · <a href="{{ url_for('logout') }}">切换</a> · <a href="{{ url_for('password') }}">改密</a></p>
-      </div>
-    </div>
-    <div class="row gap">
-      {% if user.role in ('super', 'office', 'captain') %}
-      <a href="{{ url_for('admin') }}" class="icon-btn" title="账号管理" aria-label="账号管理">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
-           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-      </svg>
-    </a>
-    {% endif %}
+<header class="header mobile-only">
+  <div class="row gap title-row">
+    <img class="logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
+    <h1 class="title">社区城管巡查</h1>
   </div>
 </header>
 
@@ -46,36 +31,58 @@
   <div id="draft-panel" class="draft-panel hidden"></div>
 </div>
 
-<form method="get" class="filter-row" onchange="this.submit()">
-  {% if can_all %}
-  <select name="team" class="input">
-    <option value="">全部中队</option>
-    {% for t in team_options %}
-    <option value="{{ t }}" {% if sel.team == t %}selected{% endif %}>{{ t }}</option>
-    {% endfor %}
-  </select>
-  {% endif %}
-  <select name="category" class="input">
-    <option value="">全部分类</option>
-    {% for c in categories %}
-    <option value="{{ c }}" {% if sel.category == c %}selected{% endif %}>{{ c }}</option>
-    {% endfor %}
-  </select>
-  {% if reporter_options %}
-  <select name="reporter" class="input">
-    <option value="">全部人员</option>
-    {% for n in reporter_options %}
-    <option value="{{ n }}" {% if sel.reporter == n %}selected{% endif %}>{{ n }}</option>
-    {% endfor %}
-  </select>
-  {% endif %}
-  <select name="status" class="input">
-    <option value="">全部状态</option>
-    <option value="pending" {% if sel.status == 'pending' %}selected{% endif %}>待处理</option>
-    <option value="closed" {% if sel.status == 'closed' %}selected{% endif %}>已办结</option>
-  </select>
-  <input type="search" name="q" class="input" placeholder="搜索小区/描述"
-         value="{{ sel.q }}" onchange="this.form.submit()">
+<form method="get" class="filter-form">
+  <div class="filter-bar">
+    <input type="search" name="q" class="input filter-search" placeholder="搜索小区/描述"
+           value="{{ sel.q }}" onchange="this.form.submit()">
+    <button type="button" class="btn btn-mini btn-ghost" id="filter-toggle">
+      <span id="filter-toggle-label">筛选 / 导出</span> <span class="caret">▾</span>
+    </button>
+    <a class="btn btn-primary btn-add-desktop" href="{{ url_for('create') }}">+ 新增巡查</a>
+  </div>
+  <div id="filter-panel" class="filter-panel hidden">
+    <div class="filter-grid">
+      {% if can_all %}
+      <select name="team" class="input" onchange="this.form.submit()">
+        <option value="">全部中队</option>
+        {% for t in team_options %}
+        <option value="{{ t }}" {% if sel.team == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <select name="category" class="input" onchange="this.form.submit()">
+        <option value="">全部分类</option>
+        {% for c in categories %}
+        <option value="{{ c }}" {% if sel.category == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      {% if reporter_options %}
+      <select name="reporter" class="input" onchange="this.form.submit()">
+        <option value="">全部人员</option>
+        {% for n in reporter_options %}
+        <option value="{{ n }}" {% if sel.reporter == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <select name="status" class="input" onchange="this.form.submit()">
+        <option value="">全部状态</option>
+        <option value="pending" {% if sel.status == 'pending' %}selected{% endif %}>待处理</option>
+        <option value="closed" {% if sel.status == 'closed' %}selected{% endif %}>已办结</option>
+      </select>
+    </div>
+    <div class="export-inline">
+      <span class="muted small">导出时间段（可选）：</span>
+      <div class="row gap export-fields">
+        <input type="date" id="exp-start" class="input export-date">
+        <span class="muted">至</span>
+        <input type="date" id="exp-end" class="input export-date">
+      </div>
+      <div class="row gap">
+        <button type="button" class="btn btn-mini btn-primary" id="export-zip">导出ZIP（原图+汇总表）</button>
+        <a class="btn btn-mini btn-ghost" href="{{ url_for('export_ledger') }}">摸排台账</a>
+      </div>
+    </div>
+  </div>
   {% if sel.month %}<input type="hidden" name="month" value="{{ sel.month }}">{% endif %}
   {% if sel.community %}<input type="hidden" name="community" value="{{ sel.community }}">{% endif %}
 </form>
@@ -86,26 +93,8 @@
 </div>
 {% endif %}
 
-<div class="export-row">
-  <div class="row gap">
-    <button type="button" class="btn btn-mini btn-primary" id="export-toggle">导出</button>
-    <span class="muted small" id="export-hint">按当前筛选导出记录与照片</span>
-  </div>
-  <div id="export-panel" class="export-panel hidden">
-    <label class="export-label">时间段（可选，留空导出全部）</label>
-    <div class="row gap export-fields">
-      <input type="date" id="exp-start" class="input export-date">
-      <span class="muted">至</span>
-      <input type="date" id="exp-end" class="input export-date">
-    </div>
-    <div class="row gap">
-      <button type="button" class="btn btn-mini btn-primary" id="export-zip">导出ZIP（原图+汇总表）</button>
-      <a class="btn btn-mini btn-ghost" href="{{ url_for('export_ledger') }}">摸排台账</a>
-    </div>
-  </div>
-</div>
-
-<div class="list">
+{# 手机端：卡片列表 #}
+<div class="list list-mobile">
   {% for r in records %}
   <a class="card" href="{{ url_for('detail', rid=r.id) }}">
     {% if r.thumb %}
@@ -131,6 +120,59 @@
   {% else %}
   <p class="empty">还没有巡查记录，点右下角 + 开始记录</p>
   {% endfor %}
+</div>
+
+{# 桌面端：表格视图 #}
+<div class="table-wrap list-table">
+  <table class="table records-table">
+    <thead>
+      <tr>
+        <th class="col-thumb"></th>
+        <th>小区</th>
+        <th>分类</th>
+        <th>问题描述</th>
+        <th>上报人</th>
+        <th>时间</th>
+        <th>状态</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in records %}
+      <tr>
+        <td class="col-thumb">
+          {% if r.thumb %}
+          <img class="thumb thumb-sm" src="{{ url_for('uploads', filepath=r.thumb) }}" alt="">
+          {% else %}
+          <div class="thumb thumb-sm thumb-empty">无图</div>
+          {% endif %}
+        </td>
+        <td><b>{{ r.community or '未填小区' }}</b></td>
+        <td>{{ r.category }}</td>
+        <td class="col-desc"><span class="desc-wrap">{{ r.description }}</span></td>
+        <td>{{ r.reporter }}<p class="muted small">{{ r.team }}</p></td>
+        <td class="muted small">{{ r.created_at }}</td>
+        <td>
+          <span class="row gap">
+            {% if r.status == 'pending' and r.days_pending is not none and r.days_pending > 3 %}
+            <span class="tag tag-overdue">{{ r.days_pending }}天</span>
+            {% endif %}
+            <span class="tag {{ 'tag-closed' if r.status == 'closed' else 'tag-pending' }}">
+              {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
+          </span>
+        </td>
+        <td>
+          <div class="row gap">
+            <a class="btn btn-mini btn-ghost" href="{{ url_for('detail', rid=r.id) }}">详情</a>
+            <a class="btn btn-mini btn-ghost" href="{{ url_for('record_ledger', rid=r.id) }}">打印</a>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="empty">还没有巡查记录，点右上「+ 新增巡查」开始记录</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endblock %}
 

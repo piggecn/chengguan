@@ -6,6 +6,8 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">小区摸排台账导出</h1></div>
 </header>
 
+<div class="ledger-layout">
+<div class="ledger-side">
 {% with msgs = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in msgs %}
   <div class="banner {{ 'banner-ok' if cat == 'ok' else '' }}">{{ msg }}</div>
@@ -69,6 +71,8 @@
   <p class="muted small">「按中队/按乡镇分文件夹」会下载 ZIP，每个单位一个文件夹，各装一份台账 Excel；ZIP 里只有表格与嵌入照片，原图另用首页「导出ZIP」获取。</p>
 </div>
 
+</div>
+<div class="ledger-main">
 <p class="muted small center">共 {{ groups|length }} 个小区 · 下面即导出样式：单表连续排版，每个小区表格接上一小区照片；每组照片配表格序号与整改前后标签</p>
 
 {% for g in groups %}
@@ -131,4 +135,6 @@
 {% else %}
 <p class="empty">当前范围内没有巡查记录</p>
 {% endfor %}
+</div>
+</div>
 {% endblock %}
