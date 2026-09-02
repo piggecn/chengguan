@@ -1277,19 +1277,55 @@ LEDGER_DEPS = [
 ]
 
 
-def _ledger_groups_from(where, params):
-    """按给定 SQL 条件取记录并按小区分组（序号共用、照片收集）。"""
+def _ledger_groups_from(where, params, unit=None, unit_town=False):
+    """按给定 SQL 条件取巡查记录并按小区分组；居民投诉并入同小区表（类目「居民投诉」共用序号）。"""
     sql = "SELECT * FROM records"
     if where:
         sql += " WHERE " + where
     records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
+
+    # 居民投诉：与巡查同权限范围的筛选（单位/乡镇/小区/时间段），投诉无照片
+    cwhere, cparams = scope_where()
+
+    def cadd(cond, val):
+        nonlocal cwhere
+        cwhere = (cwhere + " AND " if cwhere else "") + cond
+        cparams.append(val)
+
+    if unit:
+        cadd("team LIKE ?" if unit_town else "team = ?",
+             (unit + "%") if unit_town else unit)
+    else:
+        team = (request.args.get("team") or "").strip()
+        town = (request.args.get("town") or "").strip()
+        if team:
+            cadd("team = ?", team)
+        elif town:
+            cadd("team LIKE ?", town + "%")
+    community = (request.args.get("community") or "").strip()
+    if community:
+        cadd("community = ?", community)
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    if start:
+        cadd("created_at >= ?", start + " 00:00")
+    if end:
+        cadd("created_at <= ?", end + " 23:59")
+    csql = "SELECT * FROM complaints"
+    if cwhere:
+        csql += " WHERE " + cwhere
+    complaints = [dict(r) for r in get_db().execute(csql, cparams).fetchall()]
+
     order = {c: i for i, c in enumerate(CATEGORIES)}
     by_comm = {}
     for r in records:
         by_comm.setdefault(r["community"] or "未填小区", []).append(r)
+    c_by_comm = {}
+    for c in complaints:
+        c_by_comm.setdefault(c["community"] or "未填小区", []).append(c)
     groups = []
-    for comm in sorted(by_comm):
-        recs = sorted(by_comm[comm],
+    for comm in sorted(set(by_comm) | set(c_by_comm)):
+        recs = sorted(by_comm.get(comm, []),
                       key=lambda r: (order.get(r["category"], 99), r["id"]))
         rows = []
         num, last_cat = 0, None
@@ -1298,6 +1334,8 @@ def _ledger_groups_from(where, params):
             if r["category"] != last_cat:
                 num += 1
                 last_cat = r["category"]
+            r["_status_text"] = "已整改" if r["status"] == "closed" else "未整改"
+            r["_remark"] = ""
             rows.append((num, r))
             for im in get_db().execute(
                 "SELECT * FROM images WHERE record_id=? ORDER BY id",
@@ -1305,6 +1343,19 @@ def _ledger_groups_from(where, params):
             ).fetchall():
                 (before if im["type"] == "before" else after).append(
                     im["filepath"])
+        # 投诉并入：类目「居民投诉」参与共用序号，排在巡查分类之后
+        for c in c_by_comm.get(comm, []):
+            if "居民投诉" != last_cat:
+                num += 1
+                last_cat = "居民投诉"
+            rows.append((num, {
+                "category": "居民投诉",
+                "description": c["content"] or "",
+                "result": "",
+                "deadline": "",
+                "_status_text": "已处理" if c["status"] == "done" else "未处理",
+                "_remark": c["phone"] or "",
+            }))
         groups.append({
             "community": comm, "rows": rows,
             "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
@@ -1449,8 +1500,8 @@ def export_ledger_xlsx():
                         rec["description"] or rec["category"],
                         rec["result"] or "",
                         rec["deadline"] or "",
-                        "已整改" if rec["status"] == "closed" else "未整改",
-                        ""]
+                        rec["_status_text"],
+                        rec["_remark"] or ""]
                 for col, v in enumerate(vals, 1):
                     cell = ws.cell(row=r, column=col, value=v)
                     cell.border = border
@@ -1531,7 +1582,8 @@ def export_ledger_xlsx():
                 if end:
                     where = (where + " AND " if where else "") + "created_at <= ?"
                     params.append(end + " 23:59")
-                groups = _ledger_groups_from(where, params)
+                groups = _ledger_groups_from(where, params, unit=unit,
+                                             unit_town=(group == "town"))
                 if not groups:
                     continue
                 z.writestr(f"{unit}/小区摸排台账_{unit}_{rng}.xlsx",

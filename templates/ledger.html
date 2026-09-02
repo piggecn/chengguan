@@ -80,8 +80,8 @@
           <td>{{ r.description or r.category }}</td>
           <td>{{ r.result or '' }}</td>
           <td>{{ r.deadline or '' }}</td>
-          <td>{{ '已整改' if r.status == 'closed' else '未整改' }}</td>
-          <td></td>
+          <td>{{ r._status_text }}</td>
+          <td>{{ r._remark or '' }}</td>
         </tr>
         {% endfor %}
         {% for i in range(g.pad) %}
