@@ -60,6 +60,15 @@ def all_unit_names():
     return [u["name"] for u in get_units()]
 
 
+def login_units():
+    """登录页单位下拉：只列已有账号的单位（跟随账号管理页建的号）。"""
+    rows = get_db().execute(
+        "SELECT DISTINCT unit FROM users WHERE unit != '' AND role != 'super'"
+    ).fetchall()
+    with_acc = {r["unit"] for r in rows}
+    return [u for u in get_units() if u["name"] in with_acc]
+
+
 def unit_kind(name):
     row = get_db().execute(
         "SELECT kind FROM units WHERE name=?", (name,)
@@ -482,8 +491,8 @@ def personnel():
             session["uid"] = u["id"]
             return redirect(url_for("index"))
         return render_template("personnel.html", error="单位、姓名或密码不对",
-                               units=get_units())
-    return render_template("personnel.html", error=None, units=get_units())
+                               units=login_units())
+    return render_template("personnel.html", error=None, units=login_units())
 
 
 @app.route("/api/users")
