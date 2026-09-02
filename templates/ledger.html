@@ -12,7 +12,7 @@
   {% endfor %}
 {% endwith %}
 
-<form method="post" action="{{ url_for('ledger_settings', start=start, end=end) }}" class="card form tight">
+<form method="post" action="{{ url_for('ledger_settings', start=start, end=end, town=sel.town, team=sel.team, group=sel.group) }}" class="card form tight">
   <p class="muted small">表头固定列（改一次自动记住，下次导出沿用）</p>
   <label>问题上报部门
     <input name="ledger_report_dept" class="input" value="{{ deps.ledger_report_dept }}">
@@ -28,13 +28,36 @@
 
 <div class="card form tight">
   <label class="export-label">时间段（可选，留空导出全部）</label>
-  <form method="get" action="{{ url_for('export_ledger') }}" class="row gap export-fields">
-    <input type="date" name="start" class="input export-date" value="{{ start }}">
-    <span class="muted">至</span>
-    <input type="date" name="end" class="input export-date" value="{{ end }}">
-    <button class="btn btn-mini btn-primary" type="submit">刷新预览</button>
+  <form method="get" action="{{ url_for('export_ledger') }}">
+    <div class="row gap export-fields">
+      <input type="date" name="start" class="input export-date" value="{{ start }}">
+      <span class="muted">至</span>
+      <input type="date" name="end" class="input export-date" value="{{ end }}">
+    </div>
+    <div class="row gap export-fields">
+      <select name="town" class="input">
+        <option value="">全部乡镇</option>
+        <option value="鄱阳镇" {{ 'selected' if sel.town == '鄱阳镇' }}>鄱阳镇</option>
+        <option value="饶州街道" {{ 'selected' if sel.town == '饶州街道' }}>饶州街道</option>
+      </select>
+      <select name="team" class="input">
+        <option value="">全部中队</option>
+        {% for t in teams %}
+        <option value="{{ t }}" {{ 'selected' if sel.team == t }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="row gap export-fields">
+      <select name="group" class="input">
+        <option value="">不分组（单个 Excel）</option>
+        <option value="team" {{ 'selected' if sel.group == 'team' }}>按中队分文件夹</option>
+        <option value="town" {{ 'selected' if sel.group == 'town' }}>按乡镇分文件夹</option>
+      </select>
+      <button class="btn btn-mini btn-primary" type="submit">刷新预览</button>
+    </div>
   </form>
-  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end) }}">下载 Excel（小区摸排台账）</a>
+  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, team=sel.team, group=sel.group) }}">下载台账（按上面选择）</a>
+  <p class="muted small">「按中队/按乡镇分文件夹」会下载 ZIP，每个单位一个文件夹，各装一份台账 Excel；ZIP 里只有表格与嵌入照片，原图另用首页「导出ZIP」获取。</p>
 </div>
 
 <p class="muted small center">共 {{ groups|length }} 个小区 · 下面即导出样式，Excel 每小区一个工作表，照片会嵌在表尾</p>

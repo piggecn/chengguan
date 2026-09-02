@@ -161,15 +161,9 @@
     });
   }
   var zipBtn = document.getElementById("export-zip");
-  var docBtn = document.getElementById("export-doc");
   if (zipBtn) {
     zipBtn.addEventListener("click", function () {
       window.location.href = buildExportUrl("/export");
-    });
-  }
-  if (docBtn) {
-    docBtn.addEventListener("click", function () {
-      window.location.href = buildExportUrl("/export/doc");
     });
   }
 
