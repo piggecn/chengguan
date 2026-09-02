@@ -1329,23 +1329,15 @@ def _ledger_workbook(groups):
     headers = ["序号", "问题上报部门", "牵头部门", "配合部门",
                "问题描述", "整改举措", "整改时限", "整改情况", "备注"]
     widths = [7.375, 14.625, 21.125, 14.375, 20.75, 21.125, 14.625, 13.125, 9.125]
-    # 照片区尺寸（px，按原表 8px/字符宽）：整改前占 A:D、整改后占 F:I，行高 368.5pt
-    BEFORE_W = int(sum(widths[0:4]) * 8)
-    AFTER_W = int(sum(widths[5:9]) * 8)
-    PHOTO_H = int(368.5 * 96 / 72)
-
-    def embed_photo(filepath, w, h):
-        """等比缩放完整显示：贴到 w×h 白底画布，返回 PIL 画布。"""
+    def embed_photo(filepath):
+        """直接取原图（不缩放、不垫白底），返回 (bytes, 宽, 高)。"""
         p = UPLOADS_DIR / filepath
         if not p.exists():
             return None
         try:
-            im = PILImage.open(p).convert("RGB")
-            canvas = PILImage.new("RGB", (w, h), (255, 255, 255))
-            im.thumbnail((w, h))
-            ow, oh = im.size
-            canvas.paste(im, ((w - ow) // 2, (h - oh) // 2))
-            return canvas
+            with PILImage.open(p) as im:
+                w, h = im.size
+            return p.read_bytes(), w, h
         except Exception:
             return None
 
@@ -1438,32 +1430,28 @@ def _ledger_workbook(groups):
                 ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
                 n = len(placements) + 1
                 if i < len(blk["before"]):
-                    canvas = embed_photo(blk["before"][i], BEFORE_W, PHOTO_H)
-                    if canvas:
-                        ob = io.BytesIO()
-                        canvas.save(ob, "PNG")
-                        ob.seek(0)
+                    res = embed_photo(blk["before"][i])
+                    if res:
+                        data, w, h = res
                         disp = f"ID_cg{n}"
                         placements.append({
                             "ref": f"A{r}", "disp": disp,
                             "x": 0, "y": int(round(y_pt * 12700)),
-                            "cx": BEFORE_W * 9525, "cy": PHOTO_H * 9525,
-                            "png": ob.getvalue(),
+                            "cx": w * 9525, "cy": h * 9525,
+                            "img": data,
                         })
                         ws.cell(row=r, column=1).value = f'=_xlfn.DISPIMG("{disp}",1)'
                         n += 1
                 if i < len(blk["after"]):
-                    canvas = embed_photo(blk["after"][i], AFTER_W, PHOTO_H)
-                    if canvas:
-                        ob = io.BytesIO()
-                        canvas.save(ob, "PNG")
-                        ob.seek(0)
+                    res = embed_photo(blk["after"][i])
+                    if res:
+                        data, w, h = res
                         disp = f"ID_cg{n}"
                         placements.append({
                             "ref": f"F{r}", "disp": disp,
                             "x": 5962650, "y": int(round(y_pt * 12700)),
-                            "cx": AFTER_W * 9525, "cy": PHOTO_H * 9525,
-                            "png": ob.getvalue(),
+                            "cx": w * 9525, "cy": h * 9525,
+                            "img": data,
                         })
                         ws.cell(row=r, column=6).value = f'=_xlfn.DISPIMG("{disp}",1)'
                 ws.row_dimensions[r].height = 368.5
@@ -1523,10 +1511,10 @@ def _inject_cellimages(buf, placements):
                         '<Override PartName="/xl/cellimages.xml" '
                         'ContentType="application/vnd.wps-officedocument.cellimage+xml"/>'
                         "</Types>")
-                if 'Extension="png"' not in text:
+                if 'Extension="jpeg"' not in text:
                     text = text.replace(
                         "</Types>",
-                        '<Default Extension="png" ContentType="image/png"/></Types>')
+                        '<Default Extension="jpeg" ContentType="image/jpeg"/></Types>')
                 data = text.encode("utf-8")
             dst.writestr(n, data)
         # cellimages.xml + 关系 + 媒体
@@ -1534,7 +1522,7 @@ def _inject_cellimages(buf, placements):
         for i, pl in enumerate(placements, 1):
             rels.append(
                 '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org'
-                '/officeDocument/2006/relationships/image" Target="media/image%d.png"/>'
+                '/officeDocument/2006/relationships/image" Target="media/image%d.jpeg"/>'
                 % (i, i))
             pics.append(
                 "<etc:cellImage><xdr:pic>"
@@ -1566,7 +1554,7 @@ def _inject_cellimages(buf, placements):
             + "</Relationships>")
         dst.writestr("xl/_rels/cellimages.xml.rels", rels_xml.encode("utf-8"))
         for i, pl in enumerate(placements, 1):
-            dst.writestr("xl/media/image%d.png" % i, pl["png"])
+            dst.writestr("xl/media/image%d.jpeg" % i, pl["img"])
     out.seek(0)
     return out
 
