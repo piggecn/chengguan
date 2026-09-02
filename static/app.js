@@ -198,15 +198,25 @@
   var roleDataEl = document.getElementById("role-data");
   if (addRole && roleDataEl) {
     var roleData = JSON.parse(roleDataEl.textContent);
+    var titleField = document.getElementById("title-field");
+    function unitKindOf(unitName) {
+      if (!addUnit) { return "team"; }
+      var opt = addUnit.querySelector('option[value="' + unitName + '"]');
+      return opt ? (opt.dataset.kind || "team") : "team";
+    }
     function fillRoles(unit) {
       addRole.innerHTML = '<option value="" disabled selected>请选择角色</option>';
-      var opts = (unit === "办公室") ? roleData.office : roleData.team;
+      var kind = unitKindOf(unit);
+      var opts = (kind === "office") ? roleData.office : roleData.team;
       opts.forEach(function (p) {
         var o = document.createElement("option");
         o.value = p[0];
         o.textContent = p[1];
         addRole.appendChild(o);
       });
+      if (titleField) {
+        titleField.classList.add("hidden");
+      }
     }
     if (!addUnit) {
       // 中队长固定单位
@@ -214,6 +224,15 @@
       fillRoles(hiddenUnit ? hiddenUnit.value : "");
     } else {
       addUnit.addEventListener("change", function () { fillRoles(addUnit.value); });
+    }
+    if (addRole && titleField) {
+      addRole.addEventListener("change", function () {
+        if (addRole.value === "office") {
+          titleField.classList.remove("hidden");
+        } else {
+          titleField.classList.add("hidden");
+        }
+      });
     }
   }
 

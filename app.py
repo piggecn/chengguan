@@ -34,7 +34,49 @@ TEAMS = [
     "鄱阳镇社区一中队", "鄱阳镇社区二中队",
     "饶州街道社区一中队", "饶州街道社区二中队",
 ]
-UNITS = TEAMS + ["办公室", "大队"]  # 大队 = 主管理员所在单位
+
+
+def get_units(kind=None):
+    """单位列表（units 表，主管理员可维护）。kind: team/office/None(全部)。"""
+    db = get_db()
+    if kind:
+        rows = db.execute(
+            "SELECT * FROM units WHERE kind=? ORDER BY sort, id", (kind,)
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM units ORDER BY sort, id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def team_units():
+    return [u["name"] for u in get_units("team")]
+
+
+def office_units():
+    return [u["name"] for u in get_units("office")]
+
+
+def all_unit_names():
+    return [u["name"] for u in get_units()]
+
+
+def unit_kind(name):
+    row = get_db().execute(
+        "SELECT kind FROM units WHERE name=?", (name,)
+    ).fetchone()
+    return row["kind"] if row else None
+
+
+def town_units():
+    """中队单位里出现过的乡镇（去重保序），用于台账按乡镇分组/筛选。"""
+    towns = []
+    for u in get_units("team"):
+        if u["town"] and u["town"] not in towns:
+            towns.append(u["town"])
+    return towns
+
+
+# 单位列表由主管理员在账号管理页维护（units 表）；TEAMS 仅作为首次初始化种子
 CATEGORIES = [
     "违法搭建", "牛皮癣小广告", "乱堆放杂物", "电动车乱停放",
     "流动摊贩", "出店经营", "毁坏绿化", "占道经营",
@@ -122,8 +164,16 @@ def init_db():
             name TEXT NOT NULL,
             unit TEXT NOT NULL,
             role TEXT NOT NULL,          -- super / office / captain / member
+            title TEXT NOT NULL DEFAULT '',
             pin TEXT NOT NULL,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS units (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            kind TEXT NOT NULL DEFAULT 'team',  -- team=中队 / office=办公室
+            town TEXT NOT NULL DEFAULT '',
+            sort INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,6 +249,27 @@ def init_db():
             db.execute(
                 "ALTER TABLE cases ADD COLUMN case_no TEXT NOT NULL DEFAULT ''")
             print("[migrate] cases 增加 case_no 列")
+        ucols = [r[1] for r in db.execute("PRAGMA table_info(users)").fetchall()]
+        if "title" not in ucols:
+            db.execute(
+                "ALTER TABLE users ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            print("[migrate] users 增加 title 列")
+        if db.execute("SELECT COUNT(*) c FROM units").fetchone()["c"] == 0:
+            for i, t in enumerate(TEAMS):
+                town = ""
+                if t.startswith("鄱阳镇"):
+                    town = "鄱阳镇"
+                elif t.startswith("饶州街道"):
+                    town = "饶州街道"
+                db.execute(
+                    "INSERT INTO units(name, kind, town, sort) VALUES(?,?,?,?)",
+                    (t, "team", town, i))
+            db.execute(
+                "INSERT INTO units(name, kind, town, sort) "
+                "VALUES('办公室','office','',99)")
+            print("[init] 已初始化单位列表（4 中队 + 办公室）")
+        # 主管理员不再挂「大队」，unit 置空走登录页单独入口
+        db.execute("UPDATE users SET unit='' WHERE role='super'")
         # 投诉并入巡查（2026-09-02 拍板）：complaints 迁移为 records（分类「投诉纠纷」）
         def _thumb_rel(rel):
             stem, ext = rel.rsplit(".", 1)
@@ -387,23 +458,34 @@ def personnel():
         unit = (request.form.get("unit") or "").strip()
         name = (request.form.get("name") or "").strip()
         pin = (request.form.get("pin") or "").strip()
-        u = get_db().execute(
-            "SELECT * FROM users WHERE unit=? AND name=? AND pin=?",
-            (unit, name, pin),
-        ).fetchone()
+        if unit == "__super__":
+            u = get_db().execute(
+                "SELECT * FROM users WHERE role='super' AND name=? AND pin=?",
+                (name, pin),
+            ).fetchone()
+        else:
+            u = get_db().execute(
+                "SELECT * FROM users WHERE unit=? AND name=? AND pin=?",
+                (unit, name, pin),
+            ).fetchone()
         if u:
             session.permanent = True
             session["uid"] = u["id"]
             return redirect(url_for("index"))
         return render_template("personnel.html", error="单位、姓名或密码不对",
-                               units=UNITS)
-    return render_template("personnel.html", error=None, units=UNITS)
+                               units=get_units())
+    return render_template("personnel.html", error=None, units=get_units())
 
 
 @app.route("/api/users")
 def api_users():
     unit = request.args.get("unit", "").strip()
-    if unit not in UNITS:
+    if unit == "__super__":
+        rows = get_db().execute(
+            "SELECT name FROM users WHERE role='super' ORDER BY id"
+        ).fetchall()
+        return jsonify([r["name"] for r in rows])
+    if unit not in all_unit_names():
         return jsonify([])
     rows = get_db().execute(
         "SELECT name FROM users WHERE unit=? ORDER BY id", (unit,)
@@ -442,12 +524,12 @@ def admin():
         users = db.execute(
             "SELECT * FROM users ORDER BY unit, id"
         ).fetchall()
-        add_units = TEAMS
+        add_units = team_units()
     else:  # super
         users = db.execute(
             "SELECT * FROM users ORDER BY unit, id"
         ).fetchall()
-        add_units = TEAMS + ["办公室"]
+        add_units = all_unit_names()
 
     # 密码可见范围：主管理员看全部；办公室看不到主管理员的；中队长只看本队队员(副中队长/队员)
     share_base = base_url()
@@ -475,13 +557,100 @@ def admin():
             "SELECT * FROM logs ORDER BY id DESC LIMIT 100"
         ).fetchall()
 
-    return render_template("admin.html", users=items, teams=TEAMS,
+    return render_template("admin.html", users=items, teams=team_units(),
                            role_labels=ROLE_LABELS, user=u,
-                           add_units=add_units,
+                           add_units=add_units, add_unit_kinds={
+                               n: unit_kind(n) for n in add_units},
+                           unit_list=get_units(),
                            base_url=get_setting("base_url", ""),
                            logs=logs,
                            team_roles=[r for r in ADD_ROLES[u["role"]] if r[0] != "office"],
                            office_roles=[r for r in ADD_ROLES[u["role"]] if r[0] == "office"])
+
+
+@app.route("/admin/unit/add", methods=["POST"])
+@require_user
+def admin_unit_add():
+    u = admin_access()
+    if u["role"] != "super":
+        flash("只有主管理员可以管理单位", "error")
+        return redirect(url_for("admin"))
+    name = (request.form.get("name") or "").strip()
+    kind = request.form.get("kind", "team").strip()
+    town = (request.form.get("town") or "").strip()
+    if not name:
+        flash("单位名称不能为空", "error")
+        return redirect(url_for("admin"))
+    if kind not in ("team", "office"):
+        kind = "team"
+    if get_db().execute("SELECT 1 FROM units WHERE name=?", (name,)).fetchone():
+        flash("已存在同名单位", "error")
+        return redirect(url_for("admin"))
+    sort = len(get_units()) + 1
+    get_db().execute(
+        "INSERT INTO units(name, kind, town, sort) VALUES(?,?,?,?)",
+        (name, kind, town, sort),
+    )
+    get_db().commit()
+    log_action("新增单位", f"{name}（{'中队' if kind == 'team' else '办公室'}）")
+    flash(f"单位「{name}」已添加", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/unit/rename", methods=["POST"])
+@require_user
+def admin_unit_rename():
+    u = admin_access()
+    if u["role"] != "super":
+        abort(403)
+    uid = request.form.get("uid", "")
+    new_name = (request.form.get("name") or "").strip()
+    row = get_db().execute(
+        "SELECT * FROM units WHERE id=?", (uid,)
+    ).fetchone() if uid.isdigit() else None
+    if not row or not new_name:
+        flash("参数不对", "error")
+        return redirect(url_for("admin"))
+    if new_name != row["name"] and get_db().execute(
+            "SELECT 1 FROM units WHERE name=?", (new_name,)).fetchone():
+        flash("已存在同名单位", "error")
+        return redirect(url_for("admin"))
+    db = get_db()
+    # 历史记录保留旧名（数据不动），仅更新单位表和该单位下账号的单位名
+    db.execute("UPDATE users SET unit=? WHERE unit=?", (new_name, row["name"]))
+    db.execute("UPDATE units SET name=?, town=? WHERE id=?",
+               (new_name, (request.form.get("town") or row["town"]).strip(),
+                uid))
+    db.commit()
+    log_action("单位改名", f"{row['name']} → {new_name}")
+    flash("单位已更新", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/unit/delete", methods=["POST"])
+@require_user
+def admin_unit_delete():
+    u = admin_access()
+    if u["role"] != "super":
+        abort(403)
+    uid = request.form.get("uid", "")
+    row = get_db().execute(
+        "SELECT * FROM units WHERE id=?", (uid,)
+    ).fetchone() if uid.isdigit() else None
+    if not row:
+        flash("参数不对", "error")
+        return redirect(url_for("admin"))
+    cnt = get_db().execute(
+        "SELECT COUNT(*) c FROM users WHERE unit=?", (row["name"],)
+    ).fetchone()["c"]
+    if cnt:
+        flash(f"「{row['name']}」下还有 {cnt} 个账号，先删除账号才能删单位", "error")
+        return redirect(url_for("admin"))
+    get_db().execute("DELETE FROM units WHERE id=?", (uid,))
+    get_db().commit()
+    log_action("删除单位", row["name"])
+    flash(f"单位「{row['name']}」已删除", "ok")
+    return redirect(url_for("admin"))
 
 
 @app.route("/admin/settings", methods=["POST"])
@@ -518,16 +687,26 @@ def admin_add():
     if u["role"] in ("office", "captain") and role not in ("vice-captain", "member"):
         flash("只能添加副中队长和队员", "error")
         return redirect(url_for("admin"))
+    title = (request.form.get("title") or "").strip()
+    kind = unit_kind(unit)
     if u["role"] == "super":
-        valid = (unit in TEAMS and role in ("captain", "vice-captain", "member")) or \
-                (unit == "办公室" and role == "office")
+        if kind == "office":
+            valid = role == "office"
+        elif kind == "team":
+            valid = role in ("captain", "vice-captain", "member")
+        else:
+            valid = False
     elif u["role"] == "office":
-        valid = unit in TEAMS and role in ("vice-captain", "member")
+        valid = kind == "team" and role in ("vice-captain", "member")
     else:
         valid = unit == u["unit"] and role in ("vice-captain", "member")
     if not valid:
         flash("单位与角色组合不合法", "error")
         return redirect(url_for("admin"))
+    if role == "office" and title not in ("办公室主任", "办公室科员"):
+        title = "办公室主任"
+    if role != "office":
+        title = ""
     if get_db().execute(
             "SELECT 1 FROM users WHERE unit=? AND name=?", (unit, name)
     ).fetchone():
@@ -535,8 +714,9 @@ def admin_add():
         return redirect(url_for("admin"))
     pin = random_pin()
     get_db().execute(
-        "INSERT INTO users(name, unit, role, pin, created_at) VALUES(?,?,?,?,?)",
-        (name, unit, role, pin, now()),
+        "INSERT INTO users(name, unit, role, title, pin, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (name, unit, role, title, pin, now()),
     )
     get_db().commit()
     log_action("创建账号", f"{unit} · {name}（{ROLE_LABELS[role]}）")
@@ -682,7 +862,7 @@ def index():
 
     # 筛选下拉选项
     can_all = u["role"] in ("super", "office")
-    team_options = TEAMS if can_all else []
+    team_options = team_units() if can_all else []
     if u["role"] in ("captain", "vice-captain"):
         reporter_rows = get_db().execute(
             "SELECT name FROM users WHERE unit=? ORDER BY id", (u["unit"],)
@@ -720,9 +900,9 @@ def create():
         deadline = (request.form.get("deadline") or "").strip()
         lead_dept = (request.form.get("lead_dept") or "").strip()
         assist_dept = (request.form.get("assist_dept") or "").strip()
-        if team not in TEAMS:
+        if team not in team_units():
             return render_template("create.html", error="请选择所属中队",
-                                   teams=TEAMS, categories=CATEGORIES,
+                                   teams=team_units(), categories=CATEGORIES,
                                    user=u), 400
         # 小区、分类、描述都可以留空（分类缺省记“其他”），传了之后可在详情页编辑补全
         db = get_db()
@@ -747,7 +927,7 @@ def create():
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
     return render_template(
-        "create.html", error=None, teams=TEAMS, categories=CATEGORIES,
+        "create.html", error=None, teams=team_units(), categories=CATEGORIES,
         user=u, old=None,
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
@@ -788,8 +968,8 @@ def edit_record(rid):
         deadline = (request.form.get("deadline") or "").strip()
         lead_dept = (request.form.get("lead_dept") or "").strip()
         assist_dept = (request.form.get("assist_dept") or "").strip()
-        if team not in TEAMS:
-            return render_template("edit.html", r=r, teams=TEAMS,
+        if team not in team_units():
+            return render_template("edit.html", r=r, teams=team_units(),
                                    categories=CATEGORIES, user=u,
                                    error="请选择所属中队"), 400
         get_db().execute(
@@ -803,7 +983,7 @@ def edit_record(rid):
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
     return render_template(
-        "edit.html", r=r, teams=TEAMS, categories=CATEGORIES,
+        "edit.html", r=r, teams=team_units(), categories=CATEGORIES,
         user=u, error=None,
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
@@ -888,10 +1068,10 @@ def cases():
         case_name = (request.form.get("case_name") or "").strip()
         progress = request.form.get("progress", "investigating")
         fine = request.form.get("fine_amount", "0").strip() or "0"
-        if team not in TEAMS or not case_name:
+        if team not in team_units() or not case_name:
             return render_template(
                 "cases.html", error="中队和案件名称要填", rows=[],
-                teams=TEAMS, progress_labels=PROGRESS_LABELS, user=u,
+                teams=team_units(), progress_labels=PROGRESS_LABELS, user=u,
             ), 400
         db.execute(
             "INSERT INTO cases(team, case_no, case_name, progress, "
@@ -924,7 +1104,7 @@ def cases():
     sql += " ORDER BY id DESC"
     rows = db.execute(sql, params).fetchall()
     return render_template("cases.html", error=None, rows=rows,
-                           teams=TEAMS, progress_labels=PROGRESS_LABELS,
+                           teams=team_units(), progress_labels=PROGRESS_LABELS,
                            user=u, can_all=u["role"] in ("super", "office"),
                            sel={"team": team_q, "progress": progress_q,
                                 "month": month})
@@ -963,8 +1143,8 @@ def case_edit(cid):
         case_no = (request.form.get("case_no") or "").strip()
         case_name = (request.form.get("case_name") or "").strip()
         fine = (request.form.get("fine_amount") or "").strip() or "0"
-        if team not in TEAMS or not case_name:
-            return render_template("case_edit.html", c=c, teams=TEAMS,
+        if team not in team_units() or not case_name:
+            return render_template("case_edit.html", c=c, teams=team_units(),
                                    user=u, error="中队和案件名称要填"), 400
         db = get_db()
         db.execute(
@@ -975,7 +1155,7 @@ def case_edit(cid):
         db.commit()
         log_action("编辑案件", f"案件#{cid} {case_name}")
         return redirect(url_for("cases"))
-    return render_template("case_edit.html", c=c, teams=TEAMS, user=u, error=None)
+    return render_template("case_edit.html", c=c, teams=team_units(), user=u, error=None)
 
 
 @app.route("/case/<int:cid>/delete", methods=["POST"])
@@ -1185,9 +1365,13 @@ def _export_filters():
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     where, params = scope_where()
+    if town:
+        t_names = [u["name"] for u in get_units("team") if u["town"] == town]
+        if t_names:
+            where = (where + " AND " if where else "") +                 "team IN (%s)" % ",".join("?" * len(t_names))
+            params += t_names
     for cond, p in [
         (team, ("team = ?", team)),
-        (town, ("team LIKE ?", town + "%")),  # 鄱阳镇/饶州街道 前缀匹配
         (category, ("category = ?", category)),
         (reporter, ("reporter = ?", reporter)),
         (status if status in ("pending", "closed") else "", ("status = ?", status)),
@@ -1285,7 +1469,8 @@ def export_ledger():
              "team": request.args.get("team", ""),
              "group": request.args.get("group", ""),
              "community": request.args.get("community", "")},
-        teams=TEAMS, community_options=sorted(cnames), user=current_user())
+        teams=team_units(), towns=town_units(),
+        community_options=sorted(cnames), user=current_user())
 
 
 @app.route("/export/ledger/settings", methods=["POST"])
@@ -1597,7 +1782,7 @@ def export_ledger_xlsx():
 
     if group in ("team", "town"):
         # 按中队/乡镇分组：每个单位一个文件夹，文件夹内放该单位的台账 Excel
-        units = TEAMS if group == "team" else ["鄱阳镇", "饶州街道"]
+        units = team_units() if group == "team" else town_units()
         town = (request.args.get("town") or "").strip()
         team = (request.args.get("team") or "").strip()
         if group == "team" and town:

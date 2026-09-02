@@ -355,3 +355,24 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
   border-radius: 50%; border: none; background: rgba(0,0,0,.65); color: #fff;
   font-size: 14px; line-height: 1; cursor: pointer;
 }
+
+/* ---------- 桌面端适配 ---------- */
+@media (min-width: 768px) {
+  .page { max-width: 960px; padding: 0 16px 72px; }
+  .tabbar { max-width: 960px; }
+  .header { max-width: 960px; margin: 0 auto; }
+  .center-card { max-width: 420px; margin: 48px auto; }
+  .list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .list .card { margin: 0; }
+  .form { max-width: 720px; margin: 0 auto; }
+  .card.form.tight { max-width: 720px; margin: 0 auto 12px; }
+  .chip-grid { grid-template-columns: repeat(4, 1fr); }
+  .photo-grid { grid-template-columns: repeat(4, 1fr); }
+  .stats-grid { grid-template-columns: repeat(4, 1fr); }
+  .export-panel, .export-row { max-width: 720px; margin-left: auto; margin-right: auto; }
+  .section { max-width: 720px; margin-left: auto; margin-right: auto; }
+  .detail, .card.detail { max-width: 720px; margin-left: auto; margin-right: auto; }
+  .filter-row { max-width: 720px; margin: 0 auto 12px; }
+  .header h1.title { font-size: 22px; }
+  .fab { right: calc(50% - 480px + 16px); }
+}

@@ -39,7 +39,7 @@
   <label>单位
     <select name="unit" id="add-unit" class="input" required>
       <option value="" disabled selected>请选择单位</option>
-      {% for t in add_units %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      {% for t in add_units %}<option value="{{ t }}" data-kind="{{ add_unit_kinds.get(t, '') }}">{{ t }}</option>{% endfor %}
     </select>
   </label>
   {% endif %}
@@ -48,8 +48,49 @@
       <option value="" disabled selected>请选择角色</option>
     </select>
   </label>
+  <label id="title-field" class="hidden">办公室职务
+    <select name="title" class="input">
+      <option value="办公室主任">办公室主任</option>
+      <option value="办公室科员">办公室科员</option>
+    </select>
+  </label>
   <button class="btn btn-primary" type="submit">创建账号（自动生成 4 位密码）</button>
 </form>
+
+{% if user.role == 'super' %}
+<div class="card form tight">
+  <b>单位管理（登录可选单位）</b>
+  <div class="unit-list">
+    {% for un in unit_list %}
+    <div class="unit-item">
+      <span class="small">{{ un.name }}（{{ '中队' if un.kind == 'team' else '办公室' }}{% if un.kind == 'team' and un.town %} · {{ un.town }}{% endif %}）</span>
+      <form method="post" action="{{ url_for('admin_unit_rename') }}" class="row gap">
+        <input type="hidden" name="uid" value="{{ un.id }}">
+        <input name="name" class="input" value="{{ un.name }}">
+        {% if un.kind == 'team' %}
+        <input name="town" class="input" value="{{ un.town }}" placeholder="乡镇（如鄱阳镇）">
+        {% endif %}
+        <button class="btn btn-mini btn-ghost" type="submit">保存</button>
+      </form>
+      <form method="post" action="{{ url_for('admin_unit_delete') }}"
+            onsubmit="return confirm('确定删除单位「{{ un.name }}」？');">
+        <input type="hidden" name="uid" value="{{ un.id }}">
+        <button class="btn btn-mini btn-danger" type="submit">删除</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  <form method="post" action="{{ url_for('admin_unit_add') }}" class="row gap">
+    <input name="name" class="input" placeholder="新单位名称" required>
+    <select name="kind" class="input">
+      <option value="team">中队</option>
+      <option value="office">办公室</option>
+    </select>
+    <input name="town" class="input" placeholder="乡镇（中队类填）">
+    <button class="btn btn-mini btn-primary" type="submit">添加单位</button>
+  </form>
+</div>
+{% endif %}
 
 <div class="list">
   {% for u2 in users %}
@@ -58,7 +99,7 @@
       <div class="row between">
         <b>{{ u2.name }}</b>
         <span class="tag {{ 'tag-closed' if u2.role in ('super','office','captain') else 'tag-pending' }}">
-          {{ role_labels.get(u2.role, u2.role) }}</span>
+          {{ u2.title if u2.title else role_labels.get(u2.role, u2.role) }}</span>
       </div>
       <p class="muted small">单位：{{ u2.unit }} ·
         {% if u2.show_pin %}密码：{{ u2.pin }}{% else %}密码：••••{% endif %}

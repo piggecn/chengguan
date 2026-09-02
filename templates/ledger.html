@@ -37,8 +37,9 @@
     <div class="row gap export-fields">
       <select name="town" class="input">
         <option value="">全部乡镇</option>
-        <option value="鄱阳镇" {{ 'selected' if sel.town == '鄱阳镇' }}>鄱阳镇</option>
-        <option value="饶州街道" {{ 'selected' if sel.town == '饶州街道' }}>饶州街道</option>
+        {% for t in towns %}
+        <option value="{{ t }}" {{ 'selected' if sel.town == t }}>{{ t }}</option>
+        {% endfor %}
       </select>
       <select name="team" class="input">
         <option value="">全部中队</option>
