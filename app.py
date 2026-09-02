@@ -155,6 +155,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             team TEXT NOT NULL,
+            case_no TEXT NOT NULL DEFAULT '',
             case_name TEXT NOT NULL,
             progress TEXT NOT NULL DEFAULT 'investigating',
             fine_amount REAL NOT NULL DEFAULT 0,
@@ -193,6 +194,11 @@ def init_db():
                 db.execute(
                     "ALTER TABLE records ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % col)
                 print("[migrate] records 增加 %s 列" % col)
+        ccols = [r[1] for r in db.execute("PRAGMA table_info(cases)").fetchall()]
+        if "case_no" not in ccols:
+            db.execute(
+                "ALTER TABLE cases ADD COLUMN case_no TEXT NOT NULL DEFAULT ''")
+            print("[migrate] cases 增加 case_no 列")
         # 投诉并入巡查（2026-09-02 拍板）：complaints 迁移为 records（分类「投诉纠纷」）
         def _thumb_rel(rel):
             stem, ext = rel.rsplit(".", 1)
@@ -878,6 +884,7 @@ def cases():
             team = u["unit"]
         else:
             team = (request.form.get("team") or "").strip()
+        case_no = (request.form.get("case_no") or "").strip()
         case_name = (request.form.get("case_name") or "").strip()
         progress = request.form.get("progress", "investigating")
         fine = request.form.get("fine_amount", "0").strip() or "0"
@@ -887,9 +894,10 @@ def cases():
                 teams=TEAMS, progress_labels=PROGRESS_LABELS, user=u,
             ), 400
         db.execute(
-            "INSERT INTO cases(team, case_name, progress, fine_amount, "
-            "reporter, created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
-            (team, case_name, progress, float(fine), u["name"],
+            "INSERT INTO cases(team, case_no, case_name, progress, "
+            "fine_amount, reporter, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (team, case_no, case_name, progress, float(fine), u["name"],
              now(), now()),
         )
         db.commit()
@@ -952,6 +960,7 @@ def case_edit(cid):
             team = (request.form.get("team") or "").strip()
         else:
             team = c["team"]
+        case_no = (request.form.get("case_no") or "").strip()
         case_name = (request.form.get("case_name") or "").strip()
         fine = (request.form.get("fine_amount") or "").strip() or "0"
         if team not in TEAMS or not case_name:
@@ -959,8 +968,9 @@ def case_edit(cid):
                                    user=u, error="中队和案件名称要填"), 400
         db = get_db()
         db.execute(
-            "UPDATE cases SET team=?, case_name=?, fine_amount=?, updated_at=? "
-            "WHERE id=?", (team, case_name, float(fine), now(), cid),
+            "UPDATE cases SET team=?, case_no=?, case_name=?, fine_amount=?, "
+            "updated_at=? WHERE id=?",
+            (team, case_no, case_name, float(fine), now(), cid),
         )
         db.commit()
         log_action("编辑案件", f"案件#{cid} {case_name}")
@@ -1297,11 +1307,9 @@ def ledger_settings():
 
 
 def _ledger_workbook(groups):
-    """生成摸排台账工作簿：单表连续排版，页脚与原表一致（第 &P 页）。"""
+    """生成摸排台账工作簿：单表连续排版，页脚与原表一致；照片用 WPS 嵌入单元格（DISPIMG）。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
-    from openpyxl.drawing.image import Image as XLImage
-    from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
     from openpyxl.utils import get_column_letter
     from PIL import Image as PILImage
 
@@ -1327,8 +1335,7 @@ def _ledger_workbook(groups):
     PHOTO_H = int(368.5 * 96 / 72)
 
     def embed_photo(filepath, w, h):
-        """等比缩放完整显示：贴到 w×h 白底画布（与照片区同比例），
-        单元格拉伸填满时不变形、不裁切，效果同 WPS 图片嵌入单元格。"""
+        """等比缩放完整显示：贴到 w×h 白底画布，返回 PIL 画布。"""
         p = UPLOADS_DIR / filepath
         if not p.exists():
             return None
@@ -1338,25 +1345,9 @@ def _ledger_workbook(groups):
             im.thumbnail((w, h))
             ow, oh = im.size
             canvas.paste(im, ((w - ow) // 2, (h - oh) // 2))
-            buf = io.BytesIO()
-            canvas.save(buf, "JPEG", quality=90)
-            buf.seek(0)
-            return XLImage(buf)
+            return canvas
         except Exception:
             return None
-
-    def cell_image(ws_, filepath, w, h, row1, col0, col1):
-        """把照片嵌入表格单元格区（from A{r} 到 D{r+1}），随表格移动缩放。"""
-        img = embed_photo(filepath, w, h)
-        if not img:
-            return False
-        img.anchor = TwoCellAnchor(
-            editAs="twoCell",
-            _from=AnchorMarker(col=col0, row=row1 - 1),
-            to=AnchorMarker(col=col1, row=row1),
-        )
-        ws_.add_image(img)
-        return True
 
     wb = Workbook()
     ws = wb.active
@@ -1377,6 +1368,8 @@ def _ledger_workbook(groups):
         ws["A1"] = "当前范围内没有巡查记录"
         ws["A1"].font = title_font
     # 单表连续排版：下一个小区的表格接在上一个小区照片下面，不强制分页
+    placements = []  # 嵌入单元格图片 {ref, disp, x, y, cx, cy, png}
+    y_pt = 0.0       # 当前行顶距表顶的点数（算图片 y 偏移）
     r = 1
     for g in groups:
         # 标题行（黑体28 居中）
@@ -1386,6 +1379,7 @@ def _ledger_workbook(groups):
         c.alignment = title_align
         ws.row_dimensions[r].height = 35.25
         r += 1
+        y_pt += 35.25
         # 表头（序号/备注黑体16，其余黑体12）
         for col, h in enumerate(headers, 1):
             cell = ws.cell(row=r, column=col, value=h)
@@ -1394,6 +1388,7 @@ def _ledger_workbook(groups):
             cell.alignment = center
         ws.row_dimensions[r].height = 35
         r += 1
+        y_pt += 35
         # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
         data_start = r
         for num, rec in g["rows"]:
@@ -1412,11 +1407,13 @@ def _ledger_workbook(groups):
                 cell.alignment = center
             ws.row_dimensions[r].height = 45
             r += 1
+            y_pt += 45
         while r < data_start + 9:  # 补足固定 9 行空间（带边框空行）
             for col in range(1, 10):
                 ws.cell(row=r, column=col).border = border
             ws.row_dimensions[r].height = 45
             r += 1
+            y_pt += 45
         # 每组照片一块：表格序号（共用分类序号）+ 整改前/整改后标签 + 照片
         for blk in g["blocks"]:
             tno = ws.cell(row=r, column=1,
@@ -1426,6 +1423,7 @@ def _ledger_workbook(groups):
             tno.alignment = center
             ws.row_dimensions[r].height = 45
             r += 1
+            y_pt += 45
             lab = ws.cell(row=r, column=1, value="整改前")
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
             lab2 = ws.cell(row=r, column=6, value="整改后")
@@ -1434,20 +1432,143 @@ def _ledger_workbook(groups):
             lab.alignment = lab2.alignment = center
             ws.row_dimensions[r].height = 45
             r += 1
+            y_pt += 45
             for i in range(max(len(blk["before"]), len(blk["after"]))):
                 ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
                 ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
+                n = len(placements) + 1
                 if i < len(blk["before"]):
-                    cell_image(ws, blk["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
+                    canvas = embed_photo(blk["before"][i], BEFORE_W, PHOTO_H)
+                    if canvas:
+                        ob = io.BytesIO()
+                        canvas.save(ob, "PNG")
+                        ob.seek(0)
+                        disp = f"ID_cg{n}"
+                        placements.append({
+                            "ref": f"A{r}", "disp": disp,
+                            "x": 0, "y": int(round(y_pt * 12700)),
+                            "cx": BEFORE_W * 9525, "cy": PHOTO_H * 9525,
+                            "png": ob.getvalue(),
+                        })
+                        ws.cell(row=r, column=1).value = f'=_xlfn.DISPIMG("{disp}",1)'
+                        n += 1
                 if i < len(blk["after"]):
-                    cell_image(ws, blk["after"][i], AFTER_W, PHOTO_H, r, 5, 9)
+                    canvas = embed_photo(blk["after"][i], AFTER_W, PHOTO_H)
+                    if canvas:
+                        ob = io.BytesIO()
+                        canvas.save(ob, "PNG")
+                        ob.seek(0)
+                        disp = f"ID_cg{n}"
+                        placements.append({
+                            "ref": f"F{r}", "disp": disp,
+                            "x": 5962650, "y": int(round(y_pt * 12700)),
+                            "cx": AFTER_W * 9525, "cy": PHOTO_H * 9525,
+                            "png": ob.getvalue(),
+                        })
+                        ws.cell(row=r, column=6).value = f'=_xlfn.DISPIMG("{disp}",1)'
                 ws.row_dimensions[r].height = 368.5
                 r += 1
+                y_pt += 368.5
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
+    if placements:
+        buf = _inject_cellimages(buf, placements)
     return buf
 
+
+def _inject_cellimages(buf, placements):
+    """向 xlsx 注入 WPS「嵌入单元格」图片：cellimages.xml + DISPIMG 公式缓存值 + 媒体。"""
+    import zipfile as _zip
+    src = _zip.ZipFile(buf)
+    out = io.BytesIO()
+    with _zip.ZipFile(out, "w", _zip.ZIP_DEFLATED) as dst:
+        for n in src.namelist():
+            data = src.read(n)
+            if n == "xl/worksheets/sheet1.xml":
+                text = data.decode("utf-8")
+                for pl in placements:
+                    ref, disp = pl["ref"], pl["disp"]
+                    # 公式单元格加 t="str" 与缓存值（同 WPS 原表写法）
+                    m = re.search(r'<c r="%s"([^>]*)>' % re.escape(ref), text)
+                    if m:
+                        text = text.replace(
+                            m.group(0),
+                            '<c r="%s"%s t="str">' % (ref, m.group(1)), 1)
+                    fstr = '_xlfn.DISPIMG("%s",1)' % disp
+                    # openpyxl 写 <f>...</f><v></v> 或 <f>...</f></c>，两种情况都补上缓存值
+                    text = text.replace(
+                        "<f>%s</f><v></v>" % fstr,
+                        '<f>%s</f><v>=DISPIMG("%s",1)</v>' % (fstr, disp),
+                        1)
+                    text = text.replace(
+                        "<f>%s</f></c>" % fstr,
+                        '<f>%s</f><v>=DISPIMG("%s",1)</v></c>' % (fstr, disp),
+                        1)
+                data = text.encode("utf-8")
+            elif n == "xl/_rels/workbook.xml.rels":
+                text = data.decode("utf-8")
+                if "cellImage" not in text:
+                    text = text.replace(
+                        "</Relationships>",
+                        '<Relationship Id="rIdCellImages" '
+                        'Type="http://www.wps.cn/officeDocument/2020/cellImage" '
+                        'Target="cellimages.xml"/></Relationships>')
+                data = text.encode("utf-8")
+            elif n == "[Content_Types].xml":
+                text = data.decode("utf-8")
+                if "cellimages.xml" not in text:
+                    text = text.replace(
+                        "</Types>",
+                        '<Override PartName="/xl/cellimages.xml" '
+                        'ContentType="application/vnd.wps-officedocument.cellimage+xml"/>'
+                        "</Types>")
+                if 'Extension="png"' not in text:
+                    text = text.replace(
+                        "</Types>",
+                        '<Default Extension="png" ContentType="image/png"/></Types>')
+                data = text.encode("utf-8")
+            dst.writestr(n, data)
+        # cellimages.xml + 关系 + 媒体
+        pics, rels = [], []
+        for i, pl in enumerate(placements, 1):
+            rels.append(
+                '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org'
+                '/officeDocument/2006/relationships/image" Target="media/image%d.png"/>'
+                % (i, i))
+            pics.append(
+                "<etc:cellImage><xdr:pic>"
+                + '<xdr:nvPicPr><xdr:cNvPr id="%d" name="%s"/>'
+                % (1000 + i, pl["disp"])
+                + '<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr>'
+                + "</xdr:nvPicPr>"
+                + '<xdr:blipFill><a:blip r:embed="rId%d"/>' % i
+                + "<a:stretch><a:fillRect/></a:stretch></xdr:blipFill>"
+                + '<xdr:spPr><a:xfrm><a:off x="%d" y="%d"/>'
+                % (pl["x"], pl["y"])
+                + '<a:ext cx="%d" cy="%d"/></a:xfrm>' % (pl["cx"], pl["cy"])
+                + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+                + '<a:noFill/><a:ln w="9525"><a:noFill/></a:ln></xdr:spPr>'
+                + "</xdr:pic></etc:cellImage>")
+        ci = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            "<etc:cellImages "
+            'xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+            'xmlns:etc="http://www.wps.cn/officeDocument/2017/etCustomData">'
+            + "".join(pics) + "</etc:cellImages>")
+        dst.writestr("xl/cellimages.xml", ci.encode("utf-8"))
+        rels_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org'
+            '/package/2006/relationships">' + "".join(rels)
+            + "</Relationships>")
+        dst.writestr("xl/_rels/cellimages.xml.rels", rels_xml.encode("utf-8"))
+        for i, pl in enumerate(placements, 1):
+            dst.writestr("xl/media/image%d.png" % i, pl["png"])
+    out.seek(0)
+    return out
 
 def _ledger_scope_label(unit=None):
     """按已选条件拼名称片段：时间 至 时间 + 乡镇/中队 + 小区。"""

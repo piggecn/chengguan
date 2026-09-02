@@ -17,6 +17,10 @@
     <span class="input readonly">{{ c.team }}</span>
     {% endif %}
   </label>
+  <label>案件编号（可选）
+    <input name="case_no" class="input" value="{{ c.case_no }}"
+           placeholder="如：鄱城立字〔2026〕第001号">
+  </label>
   <label>案件名称
     <input name="case_name" class="input" value="{{ c.case_name }}" required>
   </label>

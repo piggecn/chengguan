@@ -42,7 +42,7 @@
     <div class="card case-row">
       <div class="card-body">
         <div class="row between">
-          <b class="ellipsis">{{ c.case_name }}</b>
+          <b class="ellipsis">{% if c.case_no %}[{{ c.case_no }}] {% endif %}{{ c.case_name }}</b>
           <span class="muted small">{{ c.team }}</span>
         </div>
         <p class="muted small">{{ c.reporter }} · {{ c.created_at }}</p>
@@ -85,6 +85,9 @@
         {% endfor %}
       </select>
       {% endif %}
+    </label>
+    <label>案件编号（可选）
+      <input name="case_no" class="input" placeholder="如：鄱城立字〔2026〕第001号">
     </label>
     <label>案件名称
       <input name="case_name" class="input" placeholder="如：占用公共空间堆放物料案" required>
