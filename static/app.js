@@ -2,6 +2,22 @@
 (function () {
   "use strict";
 
+  // ---------- 安卓键盘收起后强制重绘（修复白色残影遮挡内容） ----------
+  if (window.visualViewport) {
+    var vv = window.visualViewport;
+    var lastVVH = vv.height;
+    vv.addEventListener("resize", function () {
+      // 键盘弹出/收起时高度突变，部分机型残留白色遮挡，强制整页重绘
+      if (Math.abs(vv.height - lastVVH) > 120) {
+        var b = document.body;
+        b.style.display = "none";
+        void b.offsetHeight;
+        b.style.display = "";
+      }
+      lastVVH = vv.height;
+    });
+  }
+
   // ---------- PWA：注册 Service Worker ----------
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function () {

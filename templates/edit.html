@@ -5,7 +5,7 @@
   <a class="back" href="{{ url_for('detail', rid=r.id) }}">← 返回</a>
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">编辑巡查记录</h1></div>
 </header>
-<form method="post" class="form">
+<form method="post" enctype="multipart/form-data" class="form">
   <label>所属中队
     {% if user.role in ('captain', 'vice-captain', 'member') %}
     <span class="input readonly">{{ user.unit }}</span>
@@ -51,6 +51,12 @@
   <label>配合部门（可选，留空用台账默认）
     <input name="assist_dept" class="input" list="dept-list" autocomplete="off"
            value="{{ r.assist_dept }}" placeholder="{{ assist_default }}">
+  </label>
+  <label>补充现场照片（可多张，当时没拍的在这里补）
+    <input type="file" name="photos" accept="image/*" multiple capture="environment"
+           class="input file" id="photo-input">
+    <div class="photo-preview-row" id="photo-preview"></div>
+    <span class="muted small" id="photo-hint">未选择照片</span>
   </label>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn btn-primary" type="submit">保存修改</button>

@@ -33,9 +33,16 @@ def process(file_storage, orig_path, thumb_path):
     except Exception as exc:
         raise ValueError("图片无法解析") from exc
 
-    img = _normalize(img)
-    img.save(orig_path, "JPEG", quality=95)
+    fmt = (img.format or "").upper()
+    orientation = img.getexif().get(0x0112, 1)
+    if fmt == "JPEG" and orientation in (1, None):
+        # 已是直立 JPEG：原字节直接落盘，完全零损耗
+        with open(orig_path, "wb") as f:
+            f.write(data)
+    else:
+        img = _normalize(img)
+        img.save(orig_path, "JPEG", quality=95)
 
-    thumb = img.copy()
+    thumb = _normalize(img).copy()
     thumb.thumbnail(THUMB_SIZE)
     thumb.save(thumb_path, "JPEG", quality=80)

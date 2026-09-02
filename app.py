@@ -992,6 +992,15 @@ def edit_record(rid):
             (team, community, category, description, deadline, lead_dept,
              assist_dept, rid),
         )
+        # 编辑时补拍/补充的现场照片，并入「整改前」照片
+        saved = save_photos(request.files.getlist("photos"),
+                            f"records/{rid}/before")
+        if saved:
+            get_db().executemany(
+                "INSERT INTO images(record_id, type, filepath, created_at) "
+                "VALUES(?,?,?,?)",
+                [(rid, "before", p2[0], now()) for p2 in saved],
+            )
         get_db().commit()
         log_action("编辑巡查记录", f"记录#{rid} {community or '未填小区'} · {category}")
         bump_community(community)

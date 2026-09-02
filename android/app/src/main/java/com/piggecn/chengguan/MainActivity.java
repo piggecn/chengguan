@@ -3,6 +3,7 @@ package com.piggecn.chengguan;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.Context;
@@ -10,9 +11,12 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Environment;
 import android.net.http.SslError;
 import android.os.Bundle;
 import android.webkit.CookieManager;
+import android.webkit.DownloadListener;
+import android.webkit.URLUtil;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -36,7 +40,7 @@ public class MainActivity extends Activity {
     // 服务器地址在这里改
     private static final String APP_URL = "https://pycg.pigge.cn:8888";
     // 当前版本号（发新版时与 manifest 里的 versionCode 一起 +1）
-    private static final int CURRENT_VERSION_CODE = 1;
+    private static final int CURRENT_VERSION_CODE = 2;
     private static final String UPDATE_JSON = APP_URL + "/static/apk/latest.json";
     private static final String PREFS = "cg_prefs";
     private static final String KEY_COOKIES = "cookies";
@@ -88,6 +92,38 @@ public class MainActivity extends Activity {
                                            SslError error) {
                 // 内网/自签证书场景允许继续，避免白屏
                 handler.proceed();
+            }
+        });
+
+        // 台账/照片等附件下载：交给系统下载管理器存到手机「下载」目录
+        webView.setDownloadListener(new DownloadListener() {
+            @Override
+            public void onDownloadStart(String url, String userAgent,
+                                        String contentDisposition, String mimeType,
+                                        long contentLength) {
+                try {
+                    DownloadManager.Request req =
+                            new DownloadManager.Request(Uri.parse(url));
+                    String cookies = CookieManager.getInstance().getCookie(url);
+                    if (cookies != null) {
+                        req.addRequestHeader("Cookie", cookies);
+                    }
+                    req.addRequestHeader("User-Agent", userAgent);
+                    req.setMimeType(mimeType);
+                    req.setNotificationVisibility(
+                            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                    String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                    req.setDestinationInExternalPublicDir(
+                            Environment.DIRECTORY_DOWNLOADS, fileName);
+                    DownloadManager dm =
+                            (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                    dm.enqueue(req);
+                    Toast.makeText(MainActivity.this,
+                            "开始下载：" + fileName, Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this,
+                            "下载失败，请改用浏览器打开后下载", Toast.LENGTH_SHORT).show();
+                }
             }
         });
 
