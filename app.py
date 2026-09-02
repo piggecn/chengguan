@@ -333,9 +333,10 @@ def init_db():
             db.execute(
                 "INSERT INTO users(name, unit, role, pin, created_at) "
                 "VALUES(?,?,?,?,?)",
-                ("主管理员", "大队", "super", "0000", now()),
+                ("主管理员", "", "super", "0000", now()),
             )
-            print("[init] 已创建主管理员账号：单位=大队，姓名=主管理员，初始密码=0000")
+            print("[init] 已创建唯一默认账号：主管理员（单位管理员），初始密码=0000，"
+                  "其余账号由管理员在账号管理页自行添加")
 
 
 def now() -> str:
@@ -1476,8 +1477,10 @@ def export_ledger():
         sel={"town": request.args.get("town", ""),
              "team": request.args.get("team", ""),
              "group": request.args.get("group", ""),
-             "community": request.args.get("community", "")},
+             "community": request.args.get("community", ""),
+             "category": request.args.get("category", "")},
         teams=team_units(), towns=town_units(),
+        categories=CATEGORIES,
         community_options=sorted(cnames), user=current_user())
 
 
@@ -1496,6 +1499,7 @@ def ledger_settings():
         start=request.args.get("start", ""), end=request.args.get("end", ""),
         town=request.args.get("town", ""), team=request.args.get("team", ""),
         community=request.args.get("community", ""),
+        category=request.args.get("category", ""),
         group=request.args.get("group", "")))
 
 
@@ -1817,6 +1821,10 @@ def export_ledger_xlsx():
                 if community:
                     where = (where + " AND " if where else "") + "community = ?"
                     params.append(community)
+                category = (request.args.get("category") or "").strip()
+                if category:
+                    where = (where + " AND " if where else "") + "category = ?"
+                    params.append(category)
                 groups = _ledger_groups_from(where, params, unit=unit,
                                              unit_town=(group == "town"))
                 if not groups:

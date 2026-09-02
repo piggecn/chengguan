@@ -14,7 +14,7 @@
   {% endfor %}
 {% endwith %}
 
-<form method="post" action="{{ url_for('ledger_settings', start=start, end=end, town=sel.town, team=sel.team, community=sel.community, group=sel.group) }}" class="card form tight">
+<form method="post" action="{{ url_for('ledger_settings', start=start, end=end, town=sel.town, team=sel.team, community=sel.community, category=sel.category, group=sel.group) }}" class="card form tight">
   <p class="muted small">表头固定列（改一次自动记住，下次导出沿用）</p>
   <label>问题上报部门
     <input name="ledger_report_dept" class="input" value="{{ deps.ledger_report_dept }}">
@@ -51,6 +51,12 @@
       </select>
     </div>
     <div class="row gap export-fields">
+      <select name="category" class="input">
+        <option value="">全部违法分类</option>
+        {% for c in categories %}
+        <option value="{{ c }}" {{ 'selected' if sel.category == c }}>{{ c }}</option>
+        {% endfor %}
+      </select>
       <select name="community" class="input">
         <option value="">全部小区</option>
         {% for cname in community_options %}
@@ -67,7 +73,7 @@
       <button class="btn btn-mini btn-primary" type="submit">刷新预览</button>
     </div>
   </form>
-  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, team=sel.team, community=sel.community, group=sel.group) }}">下载台账（按上面选择）</a>
+  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, team=sel.team, community=sel.community, category=sel.category, group=sel.group) }}">下载台账（按上面选择）</a>
   <p class="muted small">「按中队/按乡镇分文件夹」会下载 ZIP，每个单位一个文件夹，各装一份台账 Excel；ZIP 里只有表格与嵌入照片，原图另用首页「导出ZIP」获取。</p>
 </div>
 
