@@ -1360,6 +1360,7 @@ def _ledger_groups():
                     im["filepath"])
         groups.append({
             "community": comm, "rows": rows,
+            "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
             "before": before, "after": after,
             "before_thumbs": [thumb_of(p) for p in before],
             "after_thumbs": [thumb_of(p) for p in after],
@@ -1397,6 +1398,7 @@ def export_ledger_xlsx():
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.worksheet.pagebreak import Break
     from PIL import Image as PILImage
 
     groups, start, end = _ledger_groups()
@@ -1404,13 +1406,19 @@ def export_ledger_xlsx():
     thin = Side(style="thin")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
-    title_font = Font(name="黑体", size=16)
-    head_font = Font(name="黑体", size=11)
+    # 字体仿原表：标题黑体28、表头黑体（序号/备注16，其余12）、正文宋体11
+    title_font = Font(name="黑体", size=28)
+    title_align = Alignment(horizontal="centerContinuous", vertical="center",
+                            wrap_text=True)
+    head_big = Font(name="黑体", size=16)
+    head_small = Font(name="黑体", size=12)
+    data_font = Font(name="宋体", size=11)
+    tno_font = Font(name="宋体", size=10.5)   # 表格序号行
+    label_font = Font(name="宋体", size=24)   # 整改前/整改后标签
 
     headers = ["序号", "问题上报部门", "牵头部门", "配合部门",
                "问题描述", "整改举措", "整改时限", "整改情况", "备注"]
-    widths = [7.4, 14.6, 21.1, 14.4, 20.8, 21.1, 14.6, 13.1, 9.1]
+    widths = [7.375, 14.625, 21.125, 14.375, 20.75, 21.125, 14.625, 13.125, 9.125]
 
     def sheet_name(name):
         base = re.sub(r"[\[\]:*?/\\]", "", name)[:31] or "小区"
@@ -1424,16 +1432,14 @@ def export_ledger_xlsx():
                 return cand
         return base + "_x"
 
-    def embed_photo(filepath, target_w=380):
+    def embed_photo(filepath, box_w=400, box_h=490):
+        """照片按原表照片区（约 400×490px，行高368.5pt）等比缩放入盒。"""
         p = UPLOADS_DIR / filepath
         if not p.exists():
             return None
         try:
             im = PILImage.open(p)
-            w, h = im.size
-            if w > target_w:
-                h = int(h * target_w / w)
-                im = im.resize((target_w, h))
+            im.thumbnail((box_w, box_h))
             buf = io.BytesIO()
             im.convert("RGB").save(buf, "JPEG", quality=85)
             buf.seek(0)
@@ -1452,17 +1458,28 @@ def export_ledger_xlsx():
         ws["A1"].font = title_font
     for gi, g in enumerate(groups, 1):
         ws = wb.create_sheet(title=sheet_name(g["community"]))
+        # 纸张：A4 横向 + 原表页边距
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.paperSize = 9
+        ws.page_margins.left = ws.page_margins.right = 0.590277777777778
+        ws.page_margins.top = ws.page_margins.bottom = 0.751388888888889
+        ws.page_margins.header = ws.page_margins.footer = 0.298611111111111
+        # 标题行（黑体28 居中）
         ws.merge_cells("A1:I1")
         c = ws.cell(row=1, column=1, value=f"{g['community']}小区摸排情况")
         c.font = title_font
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        ws.row_dimensions[1].height = 30
+        c.alignment = title_align
+        ws.row_dimensions[1].height = 35.25
+        # 表头（序号/备注黑体16，其余黑体12）
         for col, (h, w) in enumerate(zip(headers, widths), 1):
             cell = ws.cell(row=2, column=col, value=h)
-            cell.font = head_font
+            cell.font = head_big if col in (1, 9) else head_small
             cell.border = border
             cell.alignment = center
             ws.column_dimensions[cell.column_letter].width = w
+        ws.column_dimensions["J"].width = 9.64  # 原表右侧余量列
+        ws.row_dimensions[2].height = 35
+        # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
         r = 3
         for num, rec in g["rows"]:
             vals = [num, deps[0], deps[1], deps[2],
@@ -1474,35 +1491,49 @@ def export_ledger_xlsx():
             for col, v in enumerate(vals, 1):
                 cell = ws.cell(row=r, column=col, value=v)
                 cell.border = border
-                cell.alignment = left if col in (5, 6) else center
+                cell.font = Font(name="宋体", size=10 if col == 5 else 11)
+                cell.alignment = center
+            ws.row_dimensions[r].height = 45
             r += 1
+        while r <= 11:  # 补足固定 9 行空间（带边框空行）
+            for col in range(1, 10):
+                ws.cell(row=r, column=col).border = border
+            ws.row_dimensions[r].height = 45
+            r += 1
+        table_end = r - 1  # 表格区末行（原表为第 11 行）
         if g["before"] or g["after"]:
-            r += 1  # 空一行
+            # 表格序号行（宋体10.5，A:B 合并）
             tno = ws.cell(row=r, column=1, value=f"{g['community']}表格序号{gi}")
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-            tno.font = head_font
+            tno.font = tno_font
+            tno.alignment = center
+            ws.row_dimensions[r].height = 45
             r += 1
+            # 整改前/整改后标签行（宋体24）
             lab = ws.cell(row=r, column=1, value="整改前")
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
             lab2 = ws.cell(row=r, column=6, value="整改后")
             ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
-            lab.font = lab2.font = head_font
+            lab.font = lab2.font = label_font
             lab.alignment = lab2.alignment = center
+            ws.row_dimensions[r].height = 45
             r += 1
+            # 照片行（行高 368.5，左前右后对照，仿原表第 14 行）
             for i in range(max(len(g["before"]), len(g["after"]))):
-                hmax = 0
                 if i < len(g["before"]):
                     img = embed_photo(g["before"][i])
                     if img:
                         ws.add_image(img, f"A{r}")
-                        hmax = max(hmax, img.height * 0.75)
                 if i < len(g["after"]):
                     img = embed_photo(g["after"][i])
                     if img:
                         ws.add_image(img, f"F{r}")
-                        hmax = max(hmax, img.height * 0.75)
-                ws.row_dimensions[r].height = max(hmax + 6, 30)
+                ws.row_dimensions[r].height = 368.5
                 r += 1
+        # 分页符：表格区之后断一页、照片区之后再断一页（仿原表第 11、14 行处断开）
+        ws.row_breaks.append(Break(id=table_end))
+        if r - 1 > table_end:
+            ws.row_breaks.append(Break(id=r - 1))
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
