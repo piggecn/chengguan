@@ -7,6 +7,7 @@ import io
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
@@ -37,7 +38,7 @@ UNITS = TEAMS + ["办公室", "大队"]  # 大队 = 主管理员所在单位
 CATEGORIES = [
     "违法搭建", "牛皮癣小广告", "乱堆放杂物", "电动车乱停放",
     "流动摊贩", "出店经营", "毁坏绿化", "占道经营",
-    "破坏市政设施", "乱倒垃圾", "噪音扰民", "其他",
+    "破坏市政设施", "乱倒垃圾", "噪音扰民", "投诉纠纷", "其他",
 ]
 PROGRESS_LABELS = {"investigating": "调查中", "filed": "已立案", "closed": "已办结"}
 ROLE_LABELS = {"super": "主管理员", "office": "办公室管理员",
@@ -133,6 +134,8 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'pending',
             result TEXT DEFAULT '',
             deadline TEXT NOT NULL DEFAULT '',
+            lead_dept TEXT NOT NULL DEFAULT '',
+            assist_dept TEXT NOT NULL DEFAULT '',
             reporter TEXT NOT NULL,
             created_at TEXT NOT NULL,
             closed_at TEXT
@@ -183,11 +186,63 @@ def init_db():
             created_at TEXT NOT NULL
         );
         """)
-        # 旧库迁移：records 缺 deadline 列时补上（整改期限）
+        # 旧库迁移：records 缺列时补上
         cols = [r[1] for r in db.execute("PRAGMA table_info(records)").fetchall()]
-        if "deadline" not in cols:
-            db.execute("ALTER TABLE records ADD COLUMN deadline TEXT NOT NULL DEFAULT ''")
-            print("[migrate] records 增加 deadline 列")
+        for col in ("deadline", "lead_dept", "assist_dept"):
+            if col not in cols:
+                db.execute(
+                    "ALTER TABLE records ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % col)
+                print("[migrate] records 增加 %s 列" % col)
+        # 投诉并入巡查（2026-09-02 拍板）：complaints 迁移为 records（分类「投诉纠纷」）
+        def _thumb_rel(rel):
+            stem, ext = rel.rsplit(".", 1)
+            return f"{stem}_thumb.{ext}"
+
+        for c in db.execute("SELECT * FROM complaints").fetchall():
+            desc = (c["content"] or "").strip()
+            if c["phone"]:
+                desc = f"{desc}（来电：{c['phone']}）" if desc else f"来电：{c['phone']}"
+            status = "closed" if c["status"] == "done" else "pending"
+            result = ""
+            if c["status"] == "done":
+                result = "已处理"
+                if c["handler"]:
+                    result += f"（处理人：{c['handler']}）"
+            cur = db.execute(
+                "INSERT INTO records(team, community, category, description, "
+                "status, result, deadline, reporter, created_at, closed_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (c["team"], c["community"] or "", "投诉纠纷", desc, status,
+                 result, "", c["reporter"] or "", c["created_at"],
+                 c["handled_at"] if c["status"] == "done" else None),
+            )
+            rid = cur.lastrowid
+            for im in db.execute(
+                "SELECT * FROM images WHERE record_id=? AND type='complaint'",
+                (c["id"],),
+            ).fetchall():
+                old_rel = im["filepath"]
+                old_p = UPLOADS_DIR / old_rel
+                new_rel = f"records/{rid}/before/{Path(old_rel).name}"
+                new_p = UPLOADS_DIR / new_rel
+                moved = False
+                if old_p.exists():
+                    new_p.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(old_p), str(new_p))
+                    moved = True
+                old_t = UPLOADS_DIR / _thumb_rel(old_rel)
+                if old_t.exists():
+                    new_t = UPLOADS_DIR / _thumb_rel(new_rel)
+                    shutil.move(str(old_t), str(new_t))
+                if moved:
+                    db.execute(
+                        "UPDATE images SET record_id=?, type='before', "
+                        "filepath=? WHERE id=?",
+                        (rid, new_rel, im["id"]))
+                else:
+                    db.execute("DELETE FROM images WHERE id=?", (im["id"],))
+            db.execute("DELETE FROM complaints WHERE id=?", (c["id"],))
+            print(f"[migrate] 投诉#{c['id']} → 巡查记录#{rid}（投诉纠纷）")
         cur = db.execute("SELECT COUNT(*) c FROM users")
         if cur.fetchone()["c"] == 0:
             db.execute(
@@ -657,6 +712,8 @@ def create():
         category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
         deadline = (request.form.get("deadline") or "").strip()
+        lead_dept = (request.form.get("lead_dept") or "").strip()
+        assist_dept = (request.form.get("assist_dept") or "").strip()
         if team not in TEAMS:
             return render_template("create.html", error="请选择所属中队",
                                    teams=TEAMS, categories=CATEGORIES,
@@ -665,9 +722,10 @@ def create():
         db = get_db()
         cur = db.execute(
             "INSERT INTO records(team, community, category, description, "
-            "status, deadline, reporter, created_at) VALUES(?,?,?,?,?,?,?,?)",
+            "status, deadline, lead_dept, assist_dept, reporter, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (team, community, category, description, "pending", deadline,
-             u["name"], now()),
+             lead_dept, assist_dept, u["name"], now()),
         )
         rid = cur.lastrowid
         saved = save_photos(request.files.getlist("photos"),
@@ -682,8 +740,11 @@ def create():
                    f"{team} · {community or '未填小区'} · {category}")
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
-    return render_template("create.html", error=None,
-                           teams=TEAMS, categories=CATEGORIES, user=u, old=None)
+    return render_template(
+        "create.html", error=None, teams=TEAMS, categories=CATEGORIES,
+        user=u, old=None,
+        lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
+        assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
 
 @app.route("/record/<int:rid>")
@@ -719,21 +780,27 @@ def edit_record(rid):
         category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
         deadline = (request.form.get("deadline") or "").strip()
+        lead_dept = (request.form.get("lead_dept") or "").strip()
+        assist_dept = (request.form.get("assist_dept") or "").strip()
         if team not in TEAMS:
             return render_template("edit.html", r=r, teams=TEAMS,
                                    categories=CATEGORIES, user=u,
                                    error="请选择所属中队"), 400
         get_db().execute(
             "UPDATE records SET team=?, community=?, category=?, description=?, "
-            "deadline=? WHERE id=?",
-            (team, community, category, description, deadline, rid),
+            "deadline=?, lead_dept=?, assist_dept=? WHERE id=?",
+            (team, community, category, description, deadline, lead_dept,
+             assist_dept, rid),
         )
         get_db().commit()
         log_action("编辑巡查记录", f"记录#{rid} {community or '未填小区'} · {category}")
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
-    return render_template("edit.html", r=r, teams=TEAMS, categories=CATEGORIES,
-                           user=u, error=None)
+    return render_template(
+        "edit.html", r=r, teams=TEAMS, categories=CATEGORIES,
+        user=u, error=None,
+        lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
+        assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
 
 @app.route("/record/<int:rid>/delete", methods=["POST"])
@@ -912,142 +979,6 @@ def case_delete(cid):
     log_action("删除案件", f"案件#{cid} {c['case_name']}")
     flash("案件已删除", "ok")
     return redirect(url_for("cases"))
-
-
-# ---------- 居民投诉 ----------
-@app.route("/complaints", methods=["GET", "POST"])
-@require_user
-def complaints():
-    u = current_user()
-    db = get_db()
-    if request.method == "POST":
-        if u["role"] in ("captain", "vice-captain", "member"):
-            team = u["unit"]
-        else:
-            team = (request.form.get("team") or "").strip()
-        community = (request.form.get("community") or "").strip()
-        phone = (request.form.get("phone") or "").strip()
-        content = (request.form.get("content") or "").strip()
-        if team not in TEAMS or not community or not content:
-            return render_template(
-                "complaints.html", error="小区和投诉内容要填", rows=[],
-                teams=TEAMS, user=u, can_all=u["role"] in ("super", "office"),
-            ), 400
-        cur = db.execute(
-            "INSERT INTO complaints(team, community, phone, content, status, "
-            "reporter, created_at) VALUES(?,?,?,?,?,?,?)",
-            (team, community, phone, content, "pending", u["name"], now()),
-        )
-        cid = cur.lastrowid
-        saved = save_photos(request.files.getlist("photos"),
-                            f"complaints/{cid}")
-        db.executemany(
-            "INSERT INTO images(record_id, type, filepath, created_at) "
-            "VALUES(?,?,?,?)",
-            [(cid, "complaint", p[0], now()) for p in saved],
-        )
-        db.commit()
-        log_action("登记投诉", f"{team} · {community or '未填小区'}")
-        bump_community(community)
-        return redirect(url_for("complaints"))
-    where, params = scope_where()
-    sql = "SELECT * FROM complaints"
-    if where:
-        sql += " WHERE " + where
-    sql += " ORDER BY id DESC"
-    rows = db.execute(sql, params).fetchall()
-    for r in rows:
-        r = dict(r)
-        img = db.execute(
-            "SELECT filepath FROM images WHERE record_id=? AND type='complaint' "
-            "ORDER BY id LIMIT 1", (r["id"],)
-        ).fetchone()
-        r["thumb"] = thumb_of(img["filepath"]) if img else None
-    return render_template("complaints.html", error=None, rows=rows,
-                           teams=TEAMS, user=u,
-                           can_all=u["role"] in ("super", "office"))
-
-
-@app.route("/complaint/<int:cid>/toggle", methods=["POST"])
-@require_user
-def complaint_toggle(cid):
-    c = get_db().execute("SELECT * FROM complaints WHERE id=?", (cid,)).fetchone()
-    if not c:
-        abort(404)
-    u = current_user()
-    if u["role"] in ("super", "office"):
-        pass
-    elif u["role"] in ("captain", "vice-captain"):
-        if c["team"] != u["unit"]:
-            abort(403)
-    else:
-        if c["reporter"] != u["name"]:
-            abort(403)
-    new_status = "done" if c["status"] == "pending" else "pending"
-    db = get_db()
-    db.execute(
-        "UPDATE complaints SET status=?, handler=?, handled_at=? WHERE id=?",
-        (new_status, u["name"] if new_status == "done" else "", now(), cid),
-    )
-    db.commit()
-    log_action("处理投诉", f"投诉#{cid} → {'已处理' if new_status == 'done' else '待处理'}")
-    return redirect(url_for("complaints"))
-
-
-def complaint_access(c):
-    u = current_user()
-    if u["role"] in ("super", "office"):
-        return True
-    if u["role"] in ("captain", "vice-captain"):
-        return c["team"] == u["unit"]
-    return c["reporter"] == u["name"]
-
-
-@app.route("/complaint/<int:cid>/edit", methods=["GET", "POST"])
-@require_user
-def complaint_edit(cid):
-    u = current_user()
-    c = get_db().execute("SELECT * FROM complaints WHERE id=?", (cid,)).fetchone()
-    if not c or not complaint_access(c):
-        abort(404)
-    if request.method == "POST":
-        community = (request.form.get("community") or "").strip()
-        phone = (request.form.get("phone") or "").strip()
-        content = (request.form.get("content") or "").strip()
-        get_db().execute(
-            "UPDATE complaints SET community=?, phone=?, content=? WHERE id=?",
-            (community, phone, content, cid),
-        )
-        get_db().commit()
-        log_action("编辑投诉", f"投诉#{cid} {community or '未填小区'}")
-        return redirect(url_for("complaints"))
-    return render_template("complaint_edit.html", c=c, user=u, error=None)
-
-
-@app.route("/complaint/<int:cid>/delete", methods=["POST"])
-@require_user
-def complaint_delete(cid):
-    c = get_db().execute("SELECT * FROM complaints WHERE id=?", (cid,)).fetchone()
-    if not c or not complaint_access(c):
-        abort(404)
-    images = get_db().execute(
-        "SELECT filepath FROM images WHERE record_id=? AND type='complaint'", (cid,)
-    ).fetchall()
-    db = get_db()
-    db.execute("DELETE FROM images WHERE record_id=? AND type='complaint'", (cid,))
-    db.execute("DELETE FROM complaints WHERE id=?", (cid,))
-    db.commit()
-    for img in images:
-        for suffix in (img["filepath"], thumb_of(img["filepath"])):
-            p = UPLOADS_DIR / suffix
-            try:
-                if p.exists():
-                    p.unlink()
-            except OSError:
-                pass
-    log_action("删除投诉", f"投诉#{cid} {c['community'] or '未填小区'}")
-    flash("投诉已删除", "ok")
-    return redirect(url_for("complaints"))
 
 
 # ---------- 统计 ----------
@@ -1284,47 +1215,12 @@ def _ledger_groups_from(where, params, unit=None, unit_town=False):
         sql += " WHERE " + where
     records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
 
-    # 居民投诉：与巡查同权限范围的筛选（单位/乡镇/小区/时间段），投诉无照片
-    cwhere, cparams = scope_where()
-
-    def cadd(cond, val):
-        nonlocal cwhere
-        cwhere = (cwhere + " AND " if cwhere else "") + cond
-        cparams.append(val)
-
-    if unit:
-        cadd("team LIKE ?" if unit_town else "team = ?",
-             (unit + "%") if unit_town else unit)
-    else:
-        team = (request.args.get("team") or "").strip()
-        town = (request.args.get("town") or "").strip()
-        if team:
-            cadd("team = ?", team)
-        elif town:
-            cadd("team LIKE ?", town + "%")
-    community = (request.args.get("community") or "").strip()
-    if community:
-        cadd("community = ?", community)
-    start = (request.args.get("start") or "").strip()
-    end = (request.args.get("end") or "").strip()
-    if start:
-        cadd("created_at >= ?", start + " 00:00")
-    if end:
-        cadd("created_at <= ?", end + " 23:59")
-    csql = "SELECT * FROM complaints"
-    if cwhere:
-        csql += " WHERE " + cwhere
-    complaints = [dict(r) for r in get_db().execute(csql, cparams).fetchall()]
-
     order = {c: i for i, c in enumerate(CATEGORIES)}
     by_comm = {}
     for r in records:
         by_comm.setdefault(r["community"] or "未填小区", []).append(r)
-    c_by_comm = {}
-    for c in complaints:
-        c_by_comm.setdefault(c["community"] or "未填小区", []).append(c)
     groups = []
-    for comm in sorted(set(by_comm) | set(c_by_comm)):
+    for comm in sorted(by_comm):
         recs = sorted(by_comm.get(comm, []),
                       key=lambda r: (order.get(r["category"], 99), r["id"]))
         rows = []
@@ -1347,19 +1243,6 @@ def _ledger_groups_from(where, params, unit=None, unit_town=False):
                 blocks.append({"num": num, "before": b, "after": a,
                                "before_thumbs": [thumb_of(p) for p in b],
                                "after_thumbs": [thumb_of(p) for p in a]})
-        # 投诉并入：类目「居民投诉」参与共用序号，排在巡查分类之后
-        for c in c_by_comm.get(comm, []):
-            if "居民投诉" != last_cat:
-                num += 1
-                last_cat = "居民投诉"
-            rows.append((num, {
-                "category": "居民投诉",
-                "description": c["content"] or "",
-                "result": "",
-                "deadline": "",
-                "_status_text": "已处理" if c["status"] == "done" else "未处理",
-                "_remark": c["phone"] or "",
-            }))
         groups.append({
             "community": comm, "rows": rows,
             "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
@@ -1385,11 +1268,6 @@ def export_ledger():
     if where:
         sql += " AND " + where
     cnames = {r["community"] for r in get_db().execute(sql, params).fetchall()}
-    cwhere, cparams = scope_where()
-    sql = "SELECT DISTINCT community FROM complaints WHERE community != ''"
-    if cwhere:
-        sql += " AND " + cwhere
-    cnames |= {r["community"] for r in get_db().execute(sql, cparams).fetchall()}
     return render_template(
         "ledger.html", groups=groups, deps=deps,
         start=start, end=end,
@@ -1519,7 +1397,9 @@ def _ledger_workbook(groups):
         # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
         data_start = r
         for num, rec in g["rows"]:
-            vals = [num, deps[0], deps[1], deps[2],
+            vals = [num, deps[0],
+                    rec.get("lead_dept") or deps[1],
+                    rec.get("assist_dept") or deps[2],
                     rec["description"] or rec["category"],
                     rec["result"] or "",
                     rec["deadline"] or "",

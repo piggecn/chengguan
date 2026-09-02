@@ -39,6 +39,19 @@
   <label>整改期限（可选）
     <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
   </label>
+  <label>牵头部门（可选，留空用台账默认）
+    <input name="lead_dept" class="input" list="dept-list" autocomplete="off"
+           value="{{ r.lead_dept }}" placeholder="{{ lead_default }}">
+    <datalist id="dept-list">
+      <option value="{{ lead_default }}"><option value="社区、物业">
+      <option value="县城管局"><option value="社区">
+      <option value="物业"><option value="大队">
+    </datalist>
+  </label>
+  <label>配合部门（可选，留空用台账默认）
+    <input name="assist_dept" class="input" list="dept-list" autocomplete="off"
+           value="{{ r.assist_dept }}" placeholder="{{ assist_default }}">
+  </label>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn btn-primary" type="submit">保存修改</button>
 </form>

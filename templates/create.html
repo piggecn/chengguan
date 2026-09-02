@@ -43,6 +43,21 @@
     <input type="date" name="deadline" class="input"
            value="{{ old.deadline if old else '' }}">
   </label>
+  <label>牵头部门（可选，留空用台账默认）
+    <input name="lead_dept" class="input" list="dept-list" autocomplete="off"
+           value="{{ old.lead_dept if old else '' }}"
+           placeholder="{{ lead_default }}">
+    <datalist id="dept-list">
+      <option value="{{ lead_default }}"><option value="社区、物业">
+      <option value="县城管局"><option value="社区">
+      <option value="物业"><option value="大队">
+    </datalist>
+  </label>
+  <label>配合部门（可选，留空用台账默认）
+    <input name="assist_dept" class="input" list="dept-list" autocomplete="off"
+           value="{{ old.assist_dept if old else '' }}"
+           placeholder="{{ assist_default }}">
+  </label>
   <label>现场照片（拍照自带时间水印，可多张）
     <input type="file" name="photos" accept="image/*" multiple capture="environment"
            class="input file" id="photo-input">
