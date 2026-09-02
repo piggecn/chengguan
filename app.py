@@ -1379,13 +1379,25 @@ def _ledger_groups():
 def export_ledger():
     groups, start, end = _ledger_groups()
     deps = {k: get_setting(k, d) or d for k, _l, d in LEDGER_DEPS}
+    # 权限范围内出现过的小区，供「打印特定小区」下拉
+    where, params = scope_where()
+    sql = "SELECT DISTINCT community FROM records WHERE community != ''"
+    if where:
+        sql += " AND " + where
+    cnames = {r["community"] for r in get_db().execute(sql, params).fetchall()}
+    cwhere, cparams = scope_where()
+    sql = "SELECT DISTINCT community FROM complaints WHERE community != ''"
+    if cwhere:
+        sql += " AND " + cwhere
+    cnames |= {r["community"] for r in get_db().execute(sql, cparams).fetchall()}
     return render_template(
         "ledger.html", groups=groups, deps=deps,
         start=start, end=end,
         sel={"town": request.args.get("town", ""),
              "team": request.args.get("team", ""),
-             "group": request.args.get("group", "")},
-        teams=TEAMS, user=current_user())
+             "group": request.args.get("group", ""),
+             "community": request.args.get("community", "")},
+        teams=TEAMS, community_options=sorted(cnames), user=current_user())
 
 
 @app.route("/export/ledger/settings", methods=["POST"])
@@ -1402,12 +1414,12 @@ def ledger_settings():
         "export_ledger",
         start=request.args.get("start", ""), end=request.args.get("end", ""),
         town=request.args.get("town", ""), team=request.args.get("team", ""),
+        community=request.args.get("community", ""),
         group=request.args.get("group", "")))
 
 
-@app.route("/export/ledger.xlsx")
-@require_user
-def export_ledger_xlsx():
+def _ledger_workbook(groups):
+    """生成摸排台账工作簿：单表连续排版，页脚与原表一致（第 &P 页）。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.drawing.image import Image as XLImage
@@ -1416,9 +1428,6 @@ def export_ledger_xlsx():
     from PIL import Image as PILImage
 
     deps = [get_setting(k, d) or d for k, _l, d in LEDGER_DEPS]
-    start = (request.args.get("start") or "").strip()
-    end = (request.args.get("end") or "").strip()
-    group = request.args.get("group", "")
     thin = Side(style="thin")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -1439,129 +1448,166 @@ def export_ledger_xlsx():
     AFTER_W = int(sum(widths[5:9]) * 8)
     PHOTO_H = int(368.5 * 96 / 72)
 
-    def build_workbook(groups):
-        def embed_photo(filepath, w, h):
-            """等比缩放完整显示：贴到 w×h 白底画布（与照片区同比例），
-            单元格拉伸填满时不变形、不裁切，效果同 WPS 图片嵌入单元格。"""
-            p = UPLOADS_DIR / filepath
-            if not p.exists():
-                return None
-            try:
-                im = PILImage.open(p).convert("RGB")
-                canvas = PILImage.new("RGB", (w, h), (255, 255, 255))
-                im.thumbnail((w, h))
-                ow, oh = im.size
-                canvas.paste(im, ((w - ow) // 2, (h - oh) // 2))
-                buf = io.BytesIO()
-                canvas.save(buf, "JPEG", quality=90)
-                buf.seek(0)
-                return XLImage(buf)
-            except Exception:
-                return None
+    def embed_photo(filepath, w, h):
+        """等比缩放完整显示：贴到 w×h 白底画布（与照片区同比例），
+        单元格拉伸填满时不变形、不裁切，效果同 WPS 图片嵌入单元格。"""
+        p = UPLOADS_DIR / filepath
+        if not p.exists():
+            return None
+        try:
+            im = PILImage.open(p).convert("RGB")
+            canvas = PILImage.new("RGB", (w, h), (255, 255, 255))
+            im.thumbnail((w, h))
+            ow, oh = im.size
+            canvas.paste(im, ((w - ow) // 2, (h - oh) // 2))
+            buf = io.BytesIO()
+            canvas.save(buf, "JPEG", quality=90)
+            buf.seek(0)
+            return XLImage(buf)
+        except Exception:
+            return None
 
-        def cell_image(ws_, filepath, w, h, row1, col0, col1):
-            """把照片嵌入表格单元格区（from A{r} 到 D{r+1}），随表格移动缩放。"""
-            img = embed_photo(filepath, w, h)
-            if not img:
-                return False
-            img.anchor = TwoCellAnchor(
-                editAs="twoCell",
-                _from=AnchorMarker(col=col0, row=row1 - 1),
-                to=AnchorMarker(col=col1, row=row1),
-            )
-            ws_.add_image(img)
-            return True
+    def cell_image(ws_, filepath, w, h, row1, col0, col1):
+        """把照片嵌入表格单元格区（from A{r} 到 D{r+1}），随表格移动缩放。"""
+        img = embed_photo(filepath, w, h)
+        if not img:
+            return False
+        img.anchor = TwoCellAnchor(
+            editAs="twoCell",
+            _from=AnchorMarker(col=col0, row=row1 - 1),
+            to=AnchorMarker(col=col1, row=row1),
+        )
+        ws_.add_image(img)
+        return True
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "小区摸排台账"
-        # 纸张：A4 横向 + 原表页边距
-        ws.page_setup.orientation = "landscape"
-        ws.page_setup.paperSize = 9
-        ws.page_margins.left = ws.page_margins.right = 0.590277777777778
-        ws.page_margins.top = ws.page_margins.bottom = 0.751388888888889
-        ws.page_margins.header = ws.page_margins.footer = 0.298611111111111
-        for col, w in enumerate(widths, 1):
-            ws.column_dimensions[get_column_letter(col)].width = w
-        ws.column_dimensions["J"].width = 9.64  # 原表右侧余量列
-        if not groups:  # 无数据时也要有可见内容
-            ws["A1"] = "当前范围内没有巡查记录"
-            ws["A1"].font = title_font
-        # 单表连续排版：下一个小区的表格接在上一个小区照片下面，不强制分页
-        r = 1
-        for g in groups:
-            # 标题行（黑体28 居中）
-            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
-            c = ws.cell(row=r, column=1, value=f"{g['community']}小区摸排情况")
-            c.font = title_font
-            c.alignment = title_align
-            ws.row_dimensions[r].height = 35.25
-            r += 1
-            # 表头（序号/备注黑体16，其余黑体12）
-            for col, h in enumerate(headers, 1):
-                cell = ws.cell(row=r, column=col, value=h)
-                cell.font = head_big if col in (1, 9) else head_small
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "小区摸排台账"
+    # 纸张：A4 横向 + 原表页边距
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_margins.left = ws.page_margins.right = 0.590277777777778
+    ws.page_margins.top = ws.page_margins.bottom = 0.751388888888889
+    ws.page_margins.header = ws.page_margins.footer = 0.298611111111111
+    # 页脚与原表一致：居中「第 &P 页」
+    ws.oddFooter.center.text = "第 &P 页"
+    ws.oddFooter.center.size = 9
+    for col, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = w
+    ws.column_dimensions["J"].width = 9.64  # 原表右侧余量列
+    if not groups:  # 无数据时也要有可见内容
+        ws["A1"] = "当前范围内没有巡查记录"
+        ws["A1"].font = title_font
+    # 单表连续排版：下一个小区的表格接在上一个小区照片下面，不强制分页
+    r = 1
+    for g in groups:
+        # 标题行（黑体28 居中）
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+        c = ws.cell(row=r, column=1, value=f"{g['community']}小区摸排情况")
+        c.font = title_font
+        c.alignment = title_align
+        ws.row_dimensions[r].height = 35.25
+        r += 1
+        # 表头（序号/备注黑体16，其余黑体12）
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=r, column=col, value=h)
+            cell.font = head_big if col in (1, 9) else head_small
+            cell.border = border
+            cell.alignment = center
+        ws.row_dimensions[r].height = 35
+        r += 1
+        # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
+        data_start = r
+        for num, rec in g["rows"]:
+            vals = [num, deps[0], deps[1], deps[2],
+                    rec["description"] or rec["category"],
+                    rec["result"] or "",
+                    rec["deadline"] or "",
+                    rec["_status_text"],
+                    rec["_remark"] or ""]
+            for col, v in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=col, value=v)
                 cell.border = border
+                cell.font = Font(name="宋体", size=10 if col == 5 else 11)
                 cell.alignment = center
-            ws.row_dimensions[r].height = 35
+            ws.row_dimensions[r].height = 45
             r += 1
-            # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
-            data_start = r
-            for num, rec in g["rows"]:
-                vals = [num, deps[0], deps[1], deps[2],
-                        rec["description"] or rec["category"],
-                        rec["result"] or "",
-                        rec["deadline"] or "",
-                        rec["_status_text"],
-                        rec["_remark"] or ""]
-                for col, v in enumerate(vals, 1):
-                    cell = ws.cell(row=r, column=col, value=v)
-                    cell.border = border
-                    cell.font = Font(name="宋体", size=10 if col == 5 else 11)
-                    cell.alignment = center
-                ws.row_dimensions[r].height = 45
-                r += 1
-            while r < data_start + 9:  # 补足固定 9 行空间（带边框空行）
-                for col in range(1, 10):
-                    ws.cell(row=r, column=col).border = border
-                ws.row_dimensions[r].height = 45
-                r += 1
-            # 每组照片一块：表格序号（共用分类序号）+ 整改前/整改后标签 + 照片
-            for blk in g["blocks"]:
-                tno = ws.cell(row=r, column=1,
-                              value=f"{g['community']}表格序号{blk['num']}")
-                ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
-                tno.font = tno_font
-                tno.alignment = center
-                ws.row_dimensions[r].height = 45
-                r += 1
-                lab = ws.cell(row=r, column=1, value="整改前")
+        while r < data_start + 9:  # 补足固定 9 行空间（带边框空行）
+            for col in range(1, 10):
+                ws.cell(row=r, column=col).border = border
+            ws.row_dimensions[r].height = 45
+            r += 1
+        # 每组照片一块：表格序号（共用分类序号）+ 整改前/整改后标签 + 照片
+        for blk in g["blocks"]:
+            tno = ws.cell(row=r, column=1,
+                          value=f"{g['community']}表格序号{blk['num']}")
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+            tno.font = tno_font
+            tno.alignment = center
+            ws.row_dimensions[r].height = 45
+            r += 1
+            lab = ws.cell(row=r, column=1, value="整改前")
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+            lab2 = ws.cell(row=r, column=6, value="整改后")
+            ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
+            lab.font = lab2.font = label_font
+            lab.alignment = lab2.alignment = center
+            ws.row_dimensions[r].height = 45
+            r += 1
+            for i in range(max(len(blk["before"]), len(blk["after"]))):
                 ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
-                lab2 = ws.cell(row=r, column=6, value="整改后")
                 ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
-                lab.font = lab2.font = label_font
-                lab.alignment = lab2.alignment = center
-                ws.row_dimensions[r].height = 45
+                if i < len(blk["before"]):
+                    cell_image(ws, blk["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
+                if i < len(blk["after"]):
+                    cell_image(ws, blk["after"][i], AFTER_W, PHOTO_H, r, 5, 9)
+                ws.row_dimensions[r].height = 368.5
                 r += 1
-                for i in range(max(len(blk["before"]), len(blk["after"]))):
-                    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
-                    ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
-                    if i < len(blk["before"]):
-                        cell_image(ws, blk["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
-                    if i < len(blk["after"]):
-                        cell_image(ws, blk["after"][i], AFTER_W, PHOTO_H, r, 5, 9)
-                    ws.row_dimensions[r].height = 368.5
-                    r += 1
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        return buf
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
-    rng = f"{start}_to_{end}" if start or end else "全部"
+
+def _ledger_scope_label(unit=None):
+    """按已选条件拼名称片段：时间 至 时间 + 乡镇/中队 + 小区。"""
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    town = (request.args.get("town") or "").strip()
+    team = (request.args.get("team") or "").strip()
+    community = (request.args.get("community") or "").strip()
+    parts = []
+    if start and end:
+        parts.append(f"{start}至{end}")
+    elif start or end:
+        parts.append(start or end)
+    if unit:
+        parts.append(unit)
+    elif team:
+        parts.append(team)
+    elif town:
+        parts.append(town)
+    if community:
+        parts.append(community)
+    return " ".join(parts) if parts else "全部"
+
+
+@app.route("/export/ledger.xlsx")
+@require_user
+def export_ledger_xlsx():
+    import zipfile as _zip
+    group = request.args.get("group", "")
+    community = (request.args.get("community") or "").strip()
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+
+    def date_part():
+        if start and end:
+            return f"{start}至{end}"
+        return start or end or ""
 
     if group in ("team", "town"):
         # 按中队/乡镇分组：每个单位一个文件夹，文件夹内放该单位的台账 Excel
-        import zipfile as _zip
         units = TEAMS if group == "team" else ["鄱阳镇", "饶州街道"]
         town = (request.args.get("town") or "").strip()
         team = (request.args.get("team") or "").strip()
@@ -1586,12 +1632,17 @@ def export_ledger_xlsx():
                 if end:
                     where = (where + " AND " if where else "") + "created_at <= ?"
                     params.append(end + " 23:59")
+                if community:
+                    where = (where + " AND " if where else "") + "community = ?"
+                    params.append(community)
                 groups = _ledger_groups_from(where, params, unit=unit,
                                              unit_town=(group == "town"))
                 if not groups:
                     continue
-                z.writestr(f"{unit}/小区摸排台账_{unit}_{rng}.xlsx",
-                           build_workbook(groups).getvalue())
+                d = date_part()
+                z.writestr(
+                    f"{unit}/{(d + ' ') if d else ''}{unit}小区摸排台账.xlsx",
+                    _ledger_workbook(groups).getvalue())
                 total += len(groups)
         if total == 0:
             zbuf = io.BytesIO()
@@ -1599,17 +1650,51 @@ def export_ledger_xlsx():
                 z.writestr("无数据.txt", "当前筛选范围内没有巡查记录")
         zbuf.seek(0)
         label = "按中队" if group == "team" else "按乡镇"
-        fname = f"摸排台账_{label}_{rng}.zip".replace("/", "-")
-        log_action("导出摸排台账", f"{label} · {rng} · {total} 个小区")
+        fname = f"{_ledger_scope_label()}小区摸排台账_{label}.zip".replace("/", "-")
+        log_action("导出摸排台账", f"{label} · {fname} · {total} 个小区")
         return send_file(zbuf, as_attachment=True, download_name=fname,
                          mimetype="application/zip")
 
     groups, _, _ = _ledger_groups()
-    buf = build_workbook(groups)
-    fname = f"小区摸排台账_{rng}.xlsx".replace("/", "-")
-    log_action("导出摸排台账", f"{rng} · {len(groups)} 个小区")
+    buf = _ledger_workbook(groups)
+    fname = f"{_ledger_scope_label()}小区摸排台账.xlsx".replace("/", "-")
+    log_action("导出摸排台账", f"{fname} · {len(groups)} 个小区")
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# 单条记录打印：按台账格式导出仅此一条（打印用）
+@app.route("/record/<int:rid>/ledger.xlsx")
+@require_user
+def record_ledger(rid):
+    r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        abort(404)
+    if not can_view_record(r):
+        abort(403)
+    r = dict(r)
+    r["_status_text"] = "已整改" if r["status"] == "closed" else "未整改"
+    r["_remark"] = ""
+    imgs = get_db().execute(
+        "SELECT * FROM images WHERE record_id=? ORDER BY id", (rid,)
+    ).fetchall()
+    before = [im["filepath"] for im in imgs if im["type"] == "before"]
+    after = [im["filepath"] for im in imgs if im["type"] == "after"]
+    blocks = []
+    if before or after:
+        blocks.append({"num": 1, "before": before, "after": after})
+    groups = [{
+        "community": r["community"] or "未填小区",
+        "rows": [(1, r)],
+        "pad": 8,
+        "blocks": blocks,
+    }]
+    buf = _ledger_workbook(groups)
+    fname = f"{(r['community'] or '未填小区')}_{r['category']}_记录{rid}.xlsx".replace("/", "-")
+    log_action("打印单条记录", f"记录#{rid} {r['community'] or '未填小区'} · {r['category']}")
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 # ---------- 数据一键备份（主管理员） ----------
 @app.route("/admin/backup")
 @require_user
