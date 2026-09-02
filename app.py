@@ -1329,7 +1329,7 @@ def _ledger_groups_from(where, params, unit=None, unit_town=False):
                       key=lambda r: (order.get(r["category"], 99), r["id"]))
         rows = []
         num, last_cat = 0, None
-        before, after = [], []
+        blocks = []  # 每组照片一块：共用该记录分类的序号
         for r in recs:
             if r["category"] != last_cat:
                 num += 1
@@ -1337,12 +1337,16 @@ def _ledger_groups_from(where, params, unit=None, unit_town=False):
             r["_status_text"] = "已整改" if r["status"] == "closed" else "未整改"
             r["_remark"] = ""
             rows.append((num, r))
+            b, a = [], []
             for im in get_db().execute(
                 "SELECT * FROM images WHERE record_id=? ORDER BY id",
                 (r["id"],),
             ).fetchall():
-                (before if im["type"] == "before" else after).append(
-                    im["filepath"])
+                (b if im["type"] == "before" else a).append(im["filepath"])
+            if b or a:
+                blocks.append({"num": num, "before": b, "after": a,
+                               "before_thumbs": [thumb_of(p) for p in b],
+                               "after_thumbs": [thumb_of(p) for p in a]})
         # 投诉并入：类目「居民投诉」参与共用序号，排在巡查分类之后
         for c in c_by_comm.get(comm, []):
             if "居民投诉" != last_cat:
@@ -1359,9 +1363,7 @@ def _ledger_groups_from(where, params, unit=None, unit_town=False):
         groups.append({
             "community": comm, "rows": rows,
             "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
-            "before": before, "after": after,
-            "before_thumbs": [thumb_of(p) for p in before],
-            "after_thumbs": [thumb_of(p) for p in after],
+            "blocks": blocks,
         })
     return groups
 
@@ -1410,7 +1412,7 @@ def export_ledger_xlsx():
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.drawing.image import Image as XLImage
     from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
-    from openpyxl.worksheet.pagebreak import Break
+    from openpyxl.utils import get_column_letter
     from PIL import Image as PILImage
 
     deps = [get_setting(k, d) or d for k, _l, d in LEDGER_DEPS]
@@ -1438,20 +1440,6 @@ def export_ledger_xlsx():
     PHOTO_H = int(368.5 * 96 / 72)
 
     def build_workbook(groups):
-        used = set()
-
-        def sheet_name(name):
-            base = re.sub(r"[\[\]:*?/\\]", "", name)[:31] or "小区"
-            if base not in used:
-                used.add(base)
-                return base
-            for i in range(2, 100):
-                cand = f"{base[:29]}{i}"
-                if cand not in used:
-                    used.add(cand)
-                    return cand
-            return base + "_x"
-
         def embed_photo(filepath, w, h):
             """等比缩放完整显示：贴到 w×h 白底画布（与照片区同比例），
             单元格拉伸填满时不变形、不裁切，效果同 WPS 图片嵌入单元格。"""
@@ -1485,36 +1473,40 @@ def export_ledger_xlsx():
             return True
 
         wb = Workbook()
-        wb.remove(wb.active)
-        if not groups:  # 无数据时也要有一张可见表，否则保存报错
-            ws = wb.create_sheet(title="无数据")
+        ws = wb.active
+        ws.title = "小区摸排台账"
+        # 纸张：A4 横向 + 原表页边距
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.paperSize = 9
+        ws.page_margins.left = ws.page_margins.right = 0.590277777777778
+        ws.page_margins.top = ws.page_margins.bottom = 0.751388888888889
+        ws.page_margins.header = ws.page_margins.footer = 0.298611111111111
+        for col, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(col)].width = w
+        ws.column_dimensions["J"].width = 9.64  # 原表右侧余量列
+        if not groups:  # 无数据时也要有可见内容
             ws["A1"] = "当前范围内没有巡查记录"
             ws["A1"].font = title_font
-        for gi, g in enumerate(groups, 1):
-            ws = wb.create_sheet(title=sheet_name(g["community"]))
-            # 纸张：A4 横向 + 原表页边距
-            ws.page_setup.orientation = "landscape"
-            ws.page_setup.paperSize = 9
-            ws.page_margins.left = ws.page_margins.right = 0.590277777777778
-            ws.page_margins.top = ws.page_margins.bottom = 0.751388888888889
-            ws.page_margins.header = ws.page_margins.footer = 0.298611111111111
+        # 单表连续排版：下一个小区的表格接在上一个小区照片下面，不强制分页
+        r = 1
+        for g in groups:
             # 标题行（黑体28 居中）
-            ws.merge_cells("A1:I1")
-            c = ws.cell(row=1, column=1, value=f"{g['community']}小区摸排情况")
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+            c = ws.cell(row=r, column=1, value=f"{g['community']}小区摸排情况")
             c.font = title_font
             c.alignment = title_align
-            ws.row_dimensions[1].height = 35.25
+            ws.row_dimensions[r].height = 35.25
+            r += 1
             # 表头（序号/备注黑体16，其余黑体12）
-            for col, (h, w) in enumerate(zip(headers, widths), 1):
-                cell = ws.cell(row=2, column=col, value=h)
+            for col, h in enumerate(headers, 1):
+                cell = ws.cell(row=r, column=col, value=h)
                 cell.font = head_big if col in (1, 9) else head_small
                 cell.border = border
                 cell.alignment = center
-                ws.column_dimensions[cell.column_letter].width = w
-            ws.column_dimensions["J"].width = 9.64  # 原表右侧余量列
-            ws.row_dimensions[2].height = 35
+            ws.row_dimensions[r].height = 35
+            r += 1
             # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
-            r = 3
+            data_start = r
             for num, rec in g["rows"]:
                 vals = [num, deps[0], deps[1], deps[2],
                         rec["description"] or rec["category"],
@@ -1529,21 +1521,20 @@ def export_ledger_xlsx():
                     cell.alignment = center
                 ws.row_dimensions[r].height = 45
                 r += 1
-            while r <= 11:  # 补足固定 9 行空间（带边框空行）
+            while r < data_start + 9:  # 补足固定 9 行空间（带边框空行）
                 for col in range(1, 10):
                     ws.cell(row=r, column=col).border = border
                 ws.row_dimensions[r].height = 45
                 r += 1
-            table_end = r - 1  # 表格区末行（原表为第 11 行）
-            if g["before"] or g["after"]:
-                # 表格序号行（宋体10.5，A:B 合并）
-                tno = ws.cell(row=r, column=1, value=f"{g['community']}表格序号{gi}")
+            # 每组照片一块：表格序号（共用分类序号）+ 整改前/整改后标签 + 照片
+            for blk in g["blocks"]:
+                tno = ws.cell(row=r, column=1,
+                              value=f"{g['community']}表格序号{blk['num']}")
                 ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
                 tno.font = tno_font
                 tno.alignment = center
                 ws.row_dimensions[r].height = 45
                 r += 1
-                # 整改前/整改后标签行（宋体24）
                 lab = ws.cell(row=r, column=1, value="整改前")
                 ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
                 lab2 = ws.cell(row=r, column=6, value="整改后")
@@ -1552,21 +1543,15 @@ def export_ledger_xlsx():
                 lab.alignment = lab2.alignment = center
                 ws.row_dimensions[r].height = 45
                 r += 1
-                # 照片行（行高 368.5，左前右后对照，仿原表第 14 行）：
-                # 原表整改前下方合并 A:D、整改后下方合并 F:I，图片嵌入该单元格区
-                for i in range(max(len(g["before"]), len(g["after"]))):
+                for i in range(max(len(blk["before"]), len(blk["after"]))):
                     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
                     ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=9)
-                    if i < len(g["before"]):
-                        cell_image(ws, g["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
-                    if i < len(g["after"]):
-                        cell_image(ws, g["after"][i], AFTER_W, PHOTO_H, r, 5, 9)
+                    if i < len(blk["before"]):
+                        cell_image(ws, blk["before"][i], BEFORE_W, PHOTO_H, r, 0, 4)
+                    if i < len(blk["after"]):
+                        cell_image(ws, blk["after"][i], AFTER_W, PHOTO_H, r, 5, 9)
                     ws.row_dimensions[r].height = 368.5
                     r += 1
-            # 分页符：表格区之后断一页、照片区之后再断一页（仿原表第 11、14 行处断开）
-            ws.row_breaks.append(Break(id=table_end))
-            if r - 1 > table_end:
-                ws.row_breaks.append(Break(id=r - 1))
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)

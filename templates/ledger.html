@@ -60,7 +60,7 @@
   <p class="muted small">「按中队/按乡镇分文件夹」会下载 ZIP，每个单位一个文件夹，各装一份台账 Excel；ZIP 里只有表格与嵌入照片，原图另用首页「导出ZIP」获取。</p>
 </div>
 
-<p class="muted small center">共 {{ groups|length }} 个小区 · 下面即导出样式，Excel 每小区一个工作表，照片会嵌在表尾</p>
+<p class="muted small center">共 {{ groups|length }} 个小区 · 下面即导出样式：单表连续排版，每个小区表格接上一小区照片；每组照片配表格序号与整改前后标签</p>
 
 {% for g in groups %}
 <section class="section">
@@ -92,32 +92,32 @@
       </tbody>
     </table>
   </div>
-  {% if g.before_thumbs or g.after_thumbs %}
-  <p class="ledger-tableno">{{ g.community }}表格序号{{ loop.index }}</p>
+  {% for blk in g.blocks %}
+  <p class="ledger-tableno">{{ g.community }}表格序号{{ blk.num }}</p>
   <div class="row gap photo-labels">
     <span class="photo-label">整改前</span><span class="photo-label">整改后</span>
   </div>
-  {% endif %}
-  {% if g.before_thumbs %}
-  <p class="muted small">整改前照片（{{ g.before_thumbs|length }} 张，将嵌入 Excel）</p>
-  <div class="photo-grid">
-    {% for t in g.before_thumbs %}
-    <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
-      <img src="{{ url_for('uploads', filepath=t) }}" alt="整改前" loading="lazy">
-    </a>
-    {% endfor %}
+  <div class="row gap photo-cols">
+    <div class="photo-col">
+      {% for t in blk.before_thumbs %}
+      <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
+        <img src="{{ url_for('uploads', filepath=t) }}" alt="整改前" loading="lazy">
+      </a>
+      {% else %}
+      <p class="muted small">无</p>
+      {% endfor %}
+    </div>
+    <div class="photo-col">
+      {% for t in blk.after_thumbs %}
+      <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
+        <img src="{{ url_for('uploads', filepath=t) }}" alt="整改后" loading="lazy">
+      </a>
+      {% else %}
+      <p class="muted small">无</p>
+      {% endfor %}
+    </div>
   </div>
-  {% endif %}
-  {% if g.after_thumbs %}
-  <p class="muted small">整改后照片（{{ g.after_thumbs|length }} 张，将嵌入 Excel）</p>
-  <div class="photo-grid">
-    {% for t in g.after_thumbs %}
-    <a href="{{ url_for('uploads', filepath=t) }}" target="_blank">
-      <img src="{{ url_for('uploads', filepath=t) }}" alt="整改后" loading="lazy">
-    </a>
-    {% endfor %}
-  </div>
-  {% endif %}
+  {% endfor %}
 </section>
 {% else %}
 <p class="empty">当前范围内没有巡查记录</p>

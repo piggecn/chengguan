@@ -171,6 +171,9 @@ label .input { margin-top: 4px; }
   flex: 1; text-align: center; font-family: "SimHei", "黑体", sans-serif;
   font-size: 14px; padding: 4px 0; background: #f5f7fa; border-radius: 6px;
 }
+.photo-cols { align-items: flex-start; }
+.photo-col { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.photo-col img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 8px; display: block; }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; }
 .ledger-table { min-width: 720px; font-size: 13px; }
 .ledger-table th, .ledger-table td { border: 1px solid #e3e8ef; }
