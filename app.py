@@ -459,8 +459,33 @@ def password():
 
 
 # ---------- 巡查记录 ----------
-def _record_where():
-    """按查询串拼 records 的筛选条件，返回 (where 子句, 参数列表)。"""
+# 记录按哪个时间划进时间段：create 录入时间；smart 智能（已结案按结案时间、
+# 未结案按录入时间）；close 结案时间。
+TIME_KEYS = {
+    "create": "created_at",
+    "smart": ("CASE WHEN status = 'closed' AND closed_at IS NOT NULL "
+              "AND closed_at <> '' THEN closed_at ELSE created_at END"),
+    "close": "closed_at",
+}
+
+
+def time_key(basis="create"):
+    """basis → records 的时间列 SQL 片段。闭集字典，不做任何插值。"""
+    return TIME_KEYS.get(basis, TIME_KEYS["create"])
+
+
+def _basis(default="create"):
+    """从查询串取统计口径；非法值回落 default。"""
+    b = (request.args.get("basis") or "").strip()
+    return b if b in TIME_KEYS else default
+
+
+def _record_where(basis="create"):
+    """按查询串拼 records 的筛选条件，返回 (where 子句, 参数列表)。
+
+    basis 决定时间条件落在哪一列；默认 create，渲染出的 SQL 与旧版逐字相同。
+    """
+    col = time_key(basis)
     town = (request.args.get("town") or request.args.get("team") or "").strip()
     where, params = "", []
     if town in TOWNS:
@@ -480,15 +505,15 @@ def _record_where():
         params.append(status)
     month = (request.args.get("month") or "").strip()
     if month:
-        where = (where + " AND " if where else "") + "created_at LIKE ?"
+        where = (where + " AND " if where else "") + col + " LIKE ?"
         params.append(month + "%")
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     if start:
-        where = (where + " AND " if where else "") + "created_at >= ?"
+        where = (where + " AND " if where else "") + col + " >= ?"
         params.append(start + " 00:00")
     if end:
-        where = (where + " AND " if where else "") + "created_at <= ?"
+        where = (where + " AND " if where else "") + col + " <= ?"
         params.append(end + " 23:59")
     q = (request.args.get("q") or "").strip()
     if q:
@@ -521,7 +546,8 @@ def _decorate(records):
 @app.route("/")
 @require_user
 def index():
-    where, params = _record_where()
+    basis = _basis("create")
+    where, params = _record_where(basis)
 
     sql = "SELECT * FROM records"
     if where:
@@ -552,17 +578,33 @@ def index():
     community_options = [r["name"] for r in get_db().execute(
         "SELECT name FROM communities ORDER BY count DESC, name").fetchall()]
 
+    # 筛选摘要：从统计页带参数跳过来时，让用户看得到也能一键清掉
+    scope = []
+    _start = (request.args.get("start") or "").strip()
+    _end = (request.args.get("end") or "").strip()
+    if _start and _end:
+        scope.append(f"{_start} 至 {_end}")
+    elif _start or _end:
+        scope.append(_start or _end)
+    if basis != "create":
+        scope.append(BASIS_LABELS[basis])
+    if request.args.get("month"):
+        scope.append(request.args.get("month"))
+    scope_note = " · ".join(scope)
+
     return render_template(
         "index.html", records=records, stats=stats, user=current_user(),
         categories=CATEGORIES,
         community_options=community_options,
+        scope_note=scope_note,
         sel={"town": request.args.get("town") or request.args.get("team") or "",
              "category": request.args.get("category", ""),
              "reporter": request.args.get("reporter", ""),
              "status": request.args.get("status", ""),
              "month": request.args.get("month", ""),
              "community": request.args.get("community", ""),
-             "q": request.args.get("q", "")},
+             "q": request.args.get("q", ""),
+             "start": _start, "end": _end, "basis": basis},
         this_month=this_month,
     )
 
@@ -774,13 +816,23 @@ def cases():
     if month:
         where = (where + " AND " if where else "") + "created_at LIKE ?"
         params.append(month + "%")
+    # 统计页带起止日期下钻过来时也要认，否则这里会静默退回按月的口径
+    for key in ("start", "end"):
+        val = (request.args.get(key) or "").strip()
+        if not val:
+            continue
+        op = ">=" if key == "start" else "<="
+        where = (where + " AND " if where else "") + f"created_at {op} ?"
+        params.append(val + (" 00:00" if key == "start" else " 23:59"))
     sql = "SELECT * FROM cases" + (" WHERE " + where if where else "")
     sql += " ORDER BY id DESC"
     rows = get_db().execute(sql, params).fetchall()
     return render_template("cases.html", error=None, rows=rows,
                            progress_labels=PROGRESS_LABELS,
                            sel={"town": town_q, "progress": progress_q,
-                                "month": month})
+                                "month": month,
+                                "start": (request.args.get("start") or "").strip(),
+                                "end": (request.args.get("end") or "").strip()})
 
 
 @app.route("/case/<int:cid>/update", methods=["POST"])
@@ -839,157 +891,135 @@ def case_delete(cid):
 
 
 # ---------- 统计 ----------
+# 时间口径：create 按录入时间；smart 智能（已结案按结案时间、未结案按录入时间）；
+# close 按结案时间。默认 smart —— 一条记录算在它该算的时段里。
+BASIS_LABELS = {
+    "create": "按录入时间",
+    "smart": "智能口径",
+    "close": "按结案时间",
+}
+BASIS_HINTS = {
+    "create": "按记录建立时间统计，跨期才办结的也算在本期。",
+    "smart": "已结案按结案时间、未结案按录入时间。",
+    "close": "只看这段时间内结案的记录，未结案不计入。",
+}
+
+
 @app.route("/stats")
 @require_user
 def stats():
-    month = request.args.get("month") or datetime.now().strftime("%Y-%m")
-    prefix = month + "%"
+    basis = _basis("smart")
+    col = time_key(basis)
     town = (request.args.get("town") or request.args.get("team") or "").strip()
-    where = "town = ?" if town in TOWNS else ""
-    params = [town] if town in TOWNS else []
-    rw = where + " AND " if where else ""
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    if not start and not end:
+        # 默认本月 1 号到今天
+        start = datetime.now().replace(day=1).strftime("%Y-%m-01")
+        end = datetime.now().strftime("%Y-%m-%d")
+
+    cond, params = [], []
+    if town in TOWNS:
+        cond.append("town = ?")
+        params.append(town)
+    if start:
+        cond.append(col + " >= ?")
+        params.append(start + " 00:00")
+    if end:
+        cond.append(col + " <= ?")
+        params.append(end + " 23:59")
+    scope = " AND ".join(cond)
     db = get_db()
-    p = params + [prefix]
 
     total = db.execute(
-        f"SELECT COUNT(*) c FROM records WHERE {rw}created_at LIKE ?", p,
-    ).fetchone()["c"]
+        "SELECT COUNT(*) c FROM records WHERE " + scope, params).fetchone()["c"]
     closed = db.execute(
-        f"SELECT COUNT(*) c FROM records WHERE {rw}created_at LIKE ? "
-        "AND status='closed'", p,
-    ).fetchone()["c"]
-
+        "SELECT COUNT(*) c FROM records WHERE " + scope + " AND status='closed'",
+        params).fetchone()["c"]
     by_town = db.execute(
-        f"SELECT town, COUNT(*) c, SUM(status='closed') closed FROM records "
-        f"WHERE {rw}created_at LIKE ? GROUP BY town", p,
-    ).fetchall()
+        "SELECT town, COUNT(*) c, SUM(status='closed') closed FROM records "
+        "WHERE " + scope + " GROUP BY town", params).fetchall()
     by_category = db.execute(
-        f"SELECT category, COUNT(*) c FROM records WHERE {rw}created_at LIKE ? "
-        "GROUP BY category ORDER BY c DESC", p,
-    ).fetchall()
+        "SELECT category, COUNT(*) c FROM records WHERE " + scope +
+        " GROUP BY category ORDER BY c DESC", params).fetchall()
     by_community = db.execute(
-        f"SELECT community, COUNT(*) c FROM records WHERE {rw}created_at LIKE ? "
-        "GROUP BY community ORDER BY c DESC LIMIT 10", p,
-    ).fetchall()
+        "SELECT community, COUNT(*) c FROM records WHERE " + scope +
+        " GROUP BY community ORDER BY c DESC LIMIT 10", params).fetchall()
+
+    # 结案口径没有办结率（分母分子同一批，恒 100%），换成未结积压和平均办理天数
+    backlog, avg_days = 0, 0
+    if basis == "close":
+        bcond = "status != 'closed'"
+        bparams = []
+        if town in TOWNS:
+            bcond += " AND town = ?"
+            bparams.append(town)
+        if end:
+            bcond += " AND created_at <= ?"
+            bparams.append(end + " 23:59")
+        backlog = db.execute(
+            "SELECT COUNT(*) c FROM records WHERE " + bcond, bparams).fetchone()["c"]
+        avg_days = db.execute(
+            "SELECT COALESCE(ROUND(AVG(julianday(closed_at) - julianday(created_at)), 1), 0) d "
+            "FROM records WHERE " + scope + " AND status='closed'", params,
+        ).fetchone()["d"]
+
+    # 案件没有结案时间，始终按登记时间
+    ccond, cparams = [], []
+    if town in TOWNS:
+        ccond.append("town = ?")
+        cparams.append(town)
+    if start:
+        ccond.append("created_at >= ?")
+        cparams.append(start + " 00:00")
+    if end:
+        ccond.append("created_at <= ?")
+        cparams.append(end + " 23:59")
+    cscope = " AND ".join(ccond)
 
     case_total = db.execute(
-        f"SELECT COUNT(*) c FROM cases WHERE {rw}created_at LIKE ?", p,
-    ).fetchone()["c"]
+        "SELECT COUNT(*) c FROM cases WHERE " + cscope, cparams).fetchone()["c"]
     case_fine = db.execute(
-        f"SELECT COALESCE(SUM(fine_amount),0) s FROM cases WHERE {rw}created_at LIKE ?",
-        p,
+        "SELECT COALESCE(SUM(fine_amount),0) s FROM cases WHERE " + cscope, cparams,
     ).fetchone()["s"]
     case_by_progress = db.execute(
-        f"SELECT progress, COUNT(*) c FROM cases WHERE {rw}created_at LIKE ? "
-        "GROUP BY progress", p,
-    ).fetchall()
+        "SELECT progress, COUNT(*) c FROM cases WHERE " + cscope +
+        " GROUP BY progress", cparams).fetchall()
     case_by_town = db.execute(
-        f"SELECT town, COUNT(*) c FROM cases WHERE {rw}created_at LIKE ? "
-        "GROUP BY town", p,
-    ).fetchall()
+        "SELECT town, COUNT(*) c FROM cases WHERE " + cscope +
+        " GROUP BY town", cparams).fetchall()
+
+    if basis == "close":
+        labels = ("本期结案", "截至未结", "平均办理天数")
+    elif basis == "smart":
+        labels = ("本期涉及", "其中已办结", "办结率")
+    else:
+        labels = ("本期发现", "其中已办结", "办结率")
 
     return render_template(
-        "stats.html", month=month,
+        "stats.html", basis=basis, basis_labels=BASIS_LABELS, labels=labels,
+        hint=BASIS_HINTS[basis], start=start, end=end,
         total=total, closed=closed,
         rate=round(closed / total * 100, 1) if total else 0,
-        by_town=by_town, by_category=by_category,
-        by_community=by_community,
+        backlog=backlog, avg_days=avg_days,
+        by_town=by_town, by_category=by_category, by_community=by_community,
         case_total=case_total, case_fine=case_fine,
         case_by_progress=case_by_progress, case_by_town=case_by_town,
         progress_labels=PROGRESS_LABELS,
         sel={"town": town if town in TOWNS else ""},
+        q={"start": start, "end": end, "basis": basis},
     )
 
-
-# ---------- 导出（Excel 文字 + 原图打包 ZIP） ----------
-@app.route("/export")
-@require_user
-def export_data():
-    from openpyxl import Workbook
-    import zipfile as _zip
-
-    month = request.args.get("month", "")
-    start = (request.args.get("start") or "").strip()
-    end = (request.args.get("end") or "").strip()
-    where, params = _record_where()
-
-    sql = "SELECT * FROM records"
-    if where:
-        sql += " WHERE " + where
-    sql += " ORDER BY id"
-    records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
-
-    # 按问题分类分组排序（按 CATEGORIES 既定顺序，组内按小区+时间）
-    order = {c: i for i, c in enumerate(CATEGORIES)}
-    records.sort(key=lambda r: (order.get(r["category"], 99),
-                                r["community"], r["id"]))
-
-    headers = ["序号", "所属乡镇", "小区", "问题分类", "问题描述", "状态",
-               "上报时间", "销号时间", "处理结果", "照片张数"]
-    widths = [6, 14, 18, 14, 44, 8, 17, 17, 30, 8]
-
-    def photo_count(rid):
-        return get_db().execute(
-            "SELECT COUNT(*) c FROM images WHERE record_id=?", (rid,)
-        ).fetchone()["c"]
-
-    def row_of(i, r):
-        return [i, r["town"], r["community"], r["category"], r["description"],
-                "已办结" if r["status"] == "closed" else "待处理",
-                r["created_at"], r["closed_at"] or "",
-                r["result"] or "", photo_count(r["id"])]
-
-    def fill_sheet(ws, rows):
-        ws.append(headers)
-        for row in rows:
-            ws.append(row)
-        for col, w in enumerate(widths, 1):
-            ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = w
-        ws.freeze_panes = "A2"
-
-    wb = Workbook()
-    # 汇总表
-    fill_sheet(wb.active, [row_of(i, r) for i, r in enumerate(records, 1)])
-    wb.active.title = "汇总"
-    # 每个问题分类一个工作表（只建非空分类）
-    by_cat = {}
-    for r in records:
-        by_cat.setdefault(r["category"], []).append(r)
-    for cat in CATEGORIES:
-        if cat not in by_cat:
-            continue
-        ws = wb.create_sheet(title=cat)
-        fill_sheet(ws, [row_of(i, r) for i, r in enumerate(by_cat[cat], 1)])
-
-    buf = io.BytesIO()
-    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as z:
-        xbuf = io.BytesIO()
-        wb.save(xbuf)
-        label = f"巡查记录_{month or '全部'}.xlsx"
-        z.writestr(label, xbuf.getvalue())
-        for i, r in enumerate(records, 1):
-            imgs = get_db().execute(
-                "SELECT * FROM images WHERE record_id=? ORDER BY id", (r["id"],)
-            ).fetchall()
-            if not imgs:
-                continue
-            for j, img in enumerate(imgs, 1):
-                p = UPLOADS_DIR / img["filepath"]
-                if not p.exists():
-                    continue
-                typ = "现场" if img["type"] == "before" else "整改"
-                z.write(p, f"照片/{r['category']}/{i}_{r['community']}_{typ}{j}.jpg")
-    buf.seek(0)
-    range_label = month or (f"{start}_to_{end}" if start or end else "全部")
-    fname = f"巡查导出_{range_label}.zip".replace("/", "-")
-    return send_file(buf, as_attachment=True, download_name=fname,
-                     mimetype="application/zip")
 
 
 # ---------- 导出筛选参数（通用） ----------
 def _export_filters():
-    """解析导出通用筛选参数，返回 (where, params, start, end, month)。"""
-    where, params = _record_where()
+    """台账导出的筛选参数，返回 (where, params, start, end, month)。
+
+    口径钉死在录入时间：URL 里手填 basis 不能让下载和页面上的预览不一致。
+    start/end 已含在 where 里，单独返回是为了给模板回填日期框、拼下载链接。
+    """
+    where, params = _record_where("create")
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     month = request.args.get("month", "")
@@ -1004,7 +1034,7 @@ LEDGER_DEPS = [
 ]
 
 
-def _ledger_groups_from(where, params, unit=None, unit_town=False):
+def _ledger_groups_from(where, params):
     """按给定 SQL 条件取巡查记录并按小区分组；居民投诉并入同小区表（类目「居民投诉」共用序号）。"""
     sql = "SELECT * FROM records"
     if where:
@@ -1059,7 +1089,7 @@ def export_ledger():
     groups, start, end = _ledger_groups()
     deps = {k: get_setting(k, d) or d for k, _l, d in LEDGER_DEPS}
     # 当前筛选范围内出现过的小区，供「打印特定小区」下拉
-    where, params = _record_where()
+    where, params = _record_where("create")
     sql = "SELECT DISTINCT community FROM records WHERE community != ''"
     if where:
         sql += " AND " + where
@@ -1068,7 +1098,6 @@ def export_ledger():
         "ledger.html", groups=groups, deps=deps,
         start=start, end=end,
         sel={"town": request.args.get("town") or request.args.get("team") or "",
-             "group": request.args.get("group", ""),
              "community": request.args.get("community", ""),
              "category": request.args.get("category", "")},
         categories=CATEGORIES,
@@ -1090,8 +1119,7 @@ def ledger_settings():
         start=request.args.get("start", ""), end=request.args.get("end", ""),
         town=request.args.get("town", ""), team=request.args.get("team", ""),
         community=request.args.get("community", ""),
-        category=request.args.get("category", ""),
-        group=request.args.get("group", "")))
+        category=request.args.get("category", "")))
 
 
 def _ledger_workbook(groups):
@@ -1346,8 +1374,8 @@ def _inject_cellimages(buf, placements):
     out.seek(0)
     return out
 
-def _ledger_scope_label(unit=None):
-    """按已选条件拼名称片段：时间 至 时间 + 乡镇 + 小区。"""
+def _ledger_scope_label():
+    """按已选条件拼文件名片段：时间 至 时间 + 乡镇 + 小区。"""
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     town = (request.args.get("town") or "").strip()
@@ -1357,9 +1385,7 @@ def _ledger_scope_label(unit=None):
         parts.append(f"{start}至{end}")
     elif start or end:
         parts.append(start or end)
-    if unit:
-        parts.append(unit)
-    elif town:
+    if town:
         parts.append(town)
     if community:
         parts.append(community)
@@ -1369,55 +1395,7 @@ def _ledger_scope_label(unit=None):
 @app.route("/export/ledger.xlsx")
 @require_user
 def export_ledger_xlsx():
-    import zipfile as _zip
-    group = request.args.get("group", "")
-    community = (request.args.get("community") or "").strip()
-    start = (request.args.get("start") or "").strip()
-    end = (request.args.get("end") or "").strip()
-
-    def date_part():
-        if start and end:
-            return f"{start}至{end}"
-        return start or end or ""
-
-    if group in ("town", "team"):   # team 是老链接写法，同样按乡镇
-        # 按乡镇分组：每个乡镇一个文件夹，文件夹内放该乡镇的台账 Excel
-        sel_town = (request.args.get("town") or "").strip()
-        towns = [sel_town] if sel_town in TOWNS else list(TOWNS)
-        category = (request.args.get("category") or "").strip()
-        zbuf = io.BytesIO()
-        total = 0
-        with _zip.ZipFile(zbuf, "w", _zip.ZIP_DEFLATED) as z:
-            for t in towns:
-                where, params = "town = ?", [t]
-                for cond, val in (("community", community), ("category", category)):
-                    if val:
-                        where += " AND " + cond + " = ?"
-                        params.append(val)
-                if start:
-                    where += " AND created_at >= ?"
-                    params.append(start + " 00:00")
-                if end:
-                    where += " AND created_at <= ?"
-                    params.append(end + " 23:59")
-                groups = _ledger_groups_from(where, params, unit=t)
-                if not groups:
-                    continue
-                d = date_part()
-                z.writestr(
-                    f"{t}/{(d + ' ') if d else ''}{t}小区摸排台账.xlsx",
-                    _ledger_workbook(groups).getvalue())
-                total += len(groups)
-        if total == 0:
-            zbuf = io.BytesIO()
-            with _zip.ZipFile(zbuf, "w", _zip.ZIP_DEFLATED) as z:
-                z.writestr("无数据.txt", "当前筛选范围内没有巡查记录")
-        zbuf.seek(0)
-        fname = f"{_ledger_scope_label()}小区摸排台账_按乡镇.zip".replace("/", "-")
-        log_action("导出摸排台账", f"按乡镇 · {fname} · {total} 个小区")
-        return send_file(zbuf, as_attachment=True, download_name=fname,
-                         mimetype="application/zip")
-
+    """导出当前筛选范围的摸排台账，单个 Excel（表格内嵌原图）。"""
     groups, _, _ = _ledger_groups()
     buf = _ledger_workbook(groups)
     fname = f"{_ledger_scope_label()}小区摸排台账.xlsx".replace("/", "-")

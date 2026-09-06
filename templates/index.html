@@ -36,7 +36,7 @@
     <input type="search" name="q" class="input filter-search" placeholder="搜索小区/描述"
            value="{{ sel.q }}" onchange="this.form.submit()">
     <button type="button" class="btn btn-mini btn-ghost" id="filter-toggle">
-      <span id="filter-toggle-label">筛选 / 导出</span> <span class="caret">▾</span>
+      <span id="filter-toggle-label">筛选</span> <span class="caret">▾</span>
     </button>
     <a class="btn btn-primary btn-add-desktop" href="{{ url_for('create') }}">+ 新增巡查</a>
   </div>
@@ -60,25 +60,16 @@
         <option value="closed" {% if sel.status == 'closed' %}selected{% endif %}>已办结</option>
       </select>
     </div>
-    <div class="export-inline">
-      <span class="muted small">导出时间段（可选）：</span>
-      <div class="row gap export-fields">
-        <input type="date" id="exp-start" class="input export-date">
-        <span class="muted">至</span>
-        <input type="date" id="exp-end" class="input export-date">
-      </div>
-      <div class="row gap">
-        <button type="button" class="btn btn-mini btn-primary" id="export-zip">导出ZIP（原图+汇总表）</button>
-        <a class="btn btn-mini btn-ghost" href="{{ url_for('export_ledger') }}">摸排台账</a>
-      </div>
-    </div>
   </div>
   {% if sel.month %}<input type="hidden" name="month" value="{{ sel.month }}">{% endif %}
   {% if sel.community %}<input type="hidden" name="community" value="{{ sel.community }}">{% endif %}
+  {% if sel.start %}<input type="hidden" name="start" value="{{ sel.start }}">{% endif %}
+  {% if sel.end %}<input type="hidden" name="end" value="{{ sel.end }}">{% endif %}
+  {% if sel.basis and sel.basis != 'create' %}<input type="hidden" name="basis" value="{{ sel.basis }}">{% endif %}
 </form>
-{% if sel.month or sel.community %}
+{% if sel.month or sel.community or scope_note %}
 <div class="filter-note">
-  已筛选：{% if sel.month %}{{ sel.month }} {% endif %}{% if sel.community %}「{{ sel.community }}」{% endif %}
+  已筛选：{% if sel.month %}{{ sel.month }} {% endif %}{% if sel.community %}「{{ sel.community }}」{% endif %}{% if scope_note %}{{ scope_note }}{% endif %}
   · <a href="{{ url_for('index') }}">清除</a>
 </div>
 {% endif %}
@@ -171,6 +162,7 @@
   <a class="tab active" href="{{ url_for('index') }}">巡查</a>
   <a class="tab" href="{{ url_for('cases') }}">案件</a>
   <a class="tab" href="{{ url_for('stats') }}">统计</a>
+  <a class="tab" href="{{ url_for('export_ledger') }}">台账</a>
 </nav>
 <a class="fab" href="{{ url_for('create') }}">+</a>
 {% endblock %}

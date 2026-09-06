@@ -82,38 +82,7 @@
     });
   }
 
-  // ---------- 导出：折叠面板，携带当前筛选条件 ----------
-  var exportToggle = document.getElementById("export-toggle");
-  var exportPanel = document.getElementById("export-panel");
-  var exportHint = document.getElementById("export-hint");
-  var filterForm = document.querySelector("form.filter-form") || document.querySelector("form.filter-row");
-  function buildExportUrl(path) {
-    var params = new URLSearchParams();
-    ["town", "category", "community", "month", "status"].forEach(function (k) {
-      if (filterForm && filterForm.elements[k] && filterForm.elements[k].value) {
-        params.set(k, filterForm.elements[k].value);
-      }
-    });
-    var s = document.getElementById("exp-start"),
-        e = document.getElementById("exp-end");
-    if (s && s.value) { params.set("start", s.value); }
-    if (e && e.value) { params.set("end", e.value); }
-    return path + (params.toString() ? "?" + params.toString() : "");
-  }
-  if (exportToggle && exportPanel) {
-    exportToggle.addEventListener("click", function () {
-      var hidden = exportPanel.classList.toggle("hidden");
-      exportToggle.textContent = hidden ? "导出" : "收起";
-    });
-  }
-  var zipBtn = document.getElementById("export-zip");
-  if (zipBtn) {
-    zipBtn.addEventListener("click", function () {
-      window.location.href = buildExportUrl("/export");
-    });
-  }
-
-  // ---------- 首页：筛选/导出折叠面板 ----------
+  // ---------- 首页：筛选折叠面板 ----------
   var filterToggle = document.getElementById("filter-toggle");
   var filterPanel = document.getElementById("filter-panel");
   var filterToggleLabel = document.getElementById("filter-toggle-label");
@@ -121,7 +90,7 @@
     filterToggle.addEventListener("click", function () {
       var hidden = filterPanel.classList.toggle("hidden");
       if (filterToggleLabel) {
-        filterToggleLabel.textContent = hidden ? "筛选 / 导出" : "收起";
+        filterToggleLabel.textContent = hidden ? "筛选" : "收起";
       }
     });
   }

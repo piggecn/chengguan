@@ -14,7 +14,7 @@
   {% endfor %}
 {% endwith %}
 
-<form method="post" action="{{ url_for('ledger_settings', start=start, end=end, town=sel.town, community=sel.community, category=sel.category, group=sel.group) }}" class="card form tight">
+<form method="post" action="{{ url_for('ledger_settings', start=start, end=end, town=sel.town, community=sel.community, category=sel.category) }}" class="card form tight">
   <p class="muted small">表头固定列（改一次自动记住，下次导出沿用）</p>
   <label>问题上报部门
     <input name="ledger_report_dept" class="input" value="{{ deps.ledger_report_dept }}">
@@ -32,42 +32,35 @@
   <label class="export-label">时间段（可选，留空导出全部）</label>
   <form method="get" action="{{ url_for('export_ledger') }}">
     <div class="row gap export-fields">
-      <input type="date" name="start" class="input export-date" value="{{ start }}">
+      <input type="date" name="start" class="input export-date" value="{{ start }}" onchange="this.form.submit()">
       <span class="muted">至</span>
-      <input type="date" name="end" class="input export-date" value="{{ end }}">
+      <input type="date" name="end" class="input export-date" value="{{ end }}" onchange="this.form.submit()">
     </div>
     <div class="row gap export-fields">
-      <select name="town" class="input">
+      <select name="town" class="input" onchange="this.form.submit()">
         <option value="">全部乡镇</option>
         {% for t in towns %}
         <option value="{{ t }}" {{ 'selected' if sel.town == t }}>{{ t }}</option>
         {% endfor %}
       </select>
-    </div>
-    <div class="row gap export-fields">
-      <select name="category" class="input">
+      <select name="category" class="input" onchange="this.form.submit()">
         <option value="">全部违法分类</option>
         {% for c in categories %}
         <option value="{{ c }}" {{ 'selected' if sel.category == c }}>{{ c }}</option>
         {% endfor %}
       </select>
-      <select name="community" class="input">
+    </div>
+    <div class="row gap export-fields">
+      <select name="community" class="input" onchange="this.form.submit()">
         <option value="">全部小区</option>
         {% for cname in community_options %}
         <option value="{{ cname }}" {{ 'selected' if sel.community == cname }}>{{ cname }}</option>
         {% endfor %}
       </select>
-      <select name="group" class="input">
-        <option value="">不分组（单个 Excel）</option>
-        <option value="town" {{ 'selected' if sel.group == 'town' }}>按乡镇分文件夹</option>
-      </select>
-    </div>
-    <div class="row gap export-fields">
-      <button class="btn btn-mini btn-primary" type="submit">刷新预览</button>
     </div>
   </form>
-  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, community=sel.community, category=sel.category, group=sel.group) }}">下载台账（按上面选择）</a>
-  <p class="muted small">「按乡镇分文件夹」会下载 ZIP，饶州街道和鄱阳镇各一个文件夹，各装一份台账 Excel；ZIP 里只有表格与嵌入照片，原图另用首页「导出ZIP」获取。</p>
+  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, community=sel.community, category=sel.category) }}">下载台账（同上预览）</a>
+  <p class="muted small">改任意一项，预览和下载都会立刻按新条件刷新，不用点按钮。台账按<b>录入时间</b>统计；Excel 里嵌的是原图，单条记录可在列表页点「打印」单独导出。</p>
 </div>
 
 </div>

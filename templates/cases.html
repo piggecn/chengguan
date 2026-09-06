@@ -31,9 +31,11 @@
       {% endfor %}
     </select>
     {% if sel.month %}<input type="hidden" name="month" value="{{ sel.month }}">{% endif %}
+    {% if sel.start %}<input type="hidden" name="start" value="{{ sel.start }}">{% endif %}
+    {% if sel.end %}<input type="hidden" name="end" value="{{ sel.end }}">{% endif %}
   </form>
-  {% if sel.month %}
-  <div class="filter-note">已筛选：{{ sel.month }} · <a href="{{ url_for('cases') }}">清除</a></div>
+  {% if sel.month or sel.start or sel.end %}
+  <div class="filter-note">已筛选：{% if sel.month %}{{ sel.month }}{% endif %}{% if sel.start or sel.end %}{% if sel.month %} · {% endif %}{% if sel.start and sel.end %}{{ sel.start }} 至 {{ sel.end }}{% elif sel.start %}{{ sel.start }} 起{% else %}至 {{ sel.end }}{% endif %}{% endif %} · <a href="{{ url_for('cases') }}">清除</a></div>
   {% endif %}
   <div class="list">
     {% for c in rows %}
@@ -108,5 +110,6 @@
   <a class="tab" href="{{ url_for('index') }}">巡查</a>
   <a class="tab active" href="{{ url_for('cases') }}">案件</a>
   <a class="tab" href="{{ url_for('stats') }}">统计</a>
+  <a class="tab" href="{{ url_for('export_ledger') }}">台账</a>
 </nav>
 {% endblock %}

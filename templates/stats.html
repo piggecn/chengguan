@@ -5,18 +5,32 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">数据统计</h1></div>
 </header>
 
-<form method="get" class="month-row">
-  <input type="month" name="month" class="input month-input" value="{{ month }}" onchange="this.form.submit()">
+<form method="get" class="filter-row" onchange="this.submit()">
+  <input type="date" name="start" class="input" value="{{ start }}" aria-label="开始日期">
+  <span class="muted">至</span>
+  <input type="date" name="end" class="input" value="{{ end }}" aria-label="结束日期">
+  <select name="basis" class="input" aria-label="时间口径">
+    {% for k, v in basis_labels.items() %}
+    <option value="{{ k }}" {{ 'selected' if basis == k }}>{{ v }}</option>
+    {% endfor %}
+  </select>
 </form>
+<p class="muted small center">{{ hint }}</p>
 
 <div class="stat-row">
-  <a class="stat" href="{{ url_for('index', month=month) }}"><b>{{ total }}</b><span>发现总数 ›</span></a>
-  <a class="stat stat-green" href="{{ url_for('index', month=month, status='closed') }}"><b>{{ closed }}</b><span>办结数 ›</span></a>
-  <a class="stat" href="{{ url_for('index', month=month) }}"><b>{{ rate }}%</b><span>办结率 ›</span></a>
+{% if basis == 'close' %}
+  <a class="stat" href="{{ url_for('index', status='closed', **q) }}"><b>{{ total }}</b><span>本期结案 ›</span></a>
+  <a class="stat" href="{{ url_for('index', status='pending', start=start, end=end) }}"><b>{{ backlog }}</b><span>截至未结 ›</span></a>
+  <a class="stat"><b>{{ avg_days }}</b><span>平均办理/天</span></a>
+{% else %}
+  <a class="stat" href="{{ url_for('index', **q) }}"><b>{{ total }}</b><span>{{ labels[0] }} ›</span></a>
+  <a class="stat stat-green" href="{{ url_for('index', status='closed', **q) }}"><b>{{ closed }}</b><span>已办结 ›</span></a>
+  <a class="stat" href="{{ url_for('index', **q) }}"><b>{{ rate }}%</b><span>办结率 ›</span></a>
+{% endif %}
 </div>
 
 {% if total == 0 and case_total == 0 %}
-<p class="empty">该月份暂无数据，换个月份看看</p>
+<p class="empty">该时段暂无数据，换个时间段或口径看看</p>
 {% endif %}
 
 <div class="tabs">
@@ -29,20 +43,22 @@
 
 <div id="panel-town" class="panel">
   {% for t in by_town %}
-  <a class="team-card" href="{{ url_for('index', month=month, town=t.town) }}">
+  {% set pct = (t.c * 100.0 / total) if basis == 'close' and total else ((t.closed * 100.0 / t.c) if t.c else 0) %}
+  {% set full = basis != 'close' and t.c and t.closed == t.c %}
+  <a class="team-card" href="{{ url_for('index', town=t.town, **q) }}">
     <div class="team-head">
       <span class="ellipsis">{{ t.town }}</span>
       <span class="row gap">
-        <b class="rate {{ 'rate-green' if t.c and t.closed == t.c else '' }}">{{ (t.closed * 100 // t.c) if t.c else 0 }}%</b>
+        <b class="rate {{ 'rate-green' if full else '' }}">{{ pct | round(1) }}%</b>
         <span class="chev">›</span>
       </span>
     </div>
-    <div class="bar-track"><div class="bar-fill {{ 'bar-green' if t.c and t.closed == t.c else '' }}"
-         style="width: {{ (t.closed * 100 // t.c) if t.c else 0 }}%"></div></div>
-    <p class="muted small">发现 {{ t.c }} 件 · 已办结 {{ t.closed }} 件</p>
+    <div class="bar-track"><div class="bar-fill {{ 'bar-green' if full else '' }}"
+         style="width: {{ pct | round(1) }}%"></div></div>
+    <p class="muted small">{% if basis == 'close' %}结案 {{ t.c }} 件 · 占本期 {{ pct | round(1) }}%{% else %}发现 {{ t.c }} 件 · 已办结 {{ t.closed }} 件{% endif %}</p>
   </a>
   {% else %}
-  <p class="muted small center">该月暂无巡查记录</p>
+  <p class="muted small center">该时段暂无巡查记录</p>
   {% endfor %}
 </div>
 
@@ -51,33 +67,34 @@
   <div class="cat-grid">
   {% for c in by_category %}
   <a class="cat-chip {{ 'cat-top' if loop.index == 1 else '' }}"
-     href="{{ url_for('index', month=month, category=c.category) }}">
+     href="{{ url_for('index', category=c.category, **q) }}">
     <b>{{ c.c }}</b><span>{{ c.category }}</span>
   </a>
   {% endfor %}
   </div>
   {% else %}
-  <p class="muted small center">该月暂无巡查记录</p>
+  <p class="muted small center">该时段暂无巡查记录</p>
   {% endif %}
 </div>
 
 <div id="panel-com" class="panel hidden">
   {% for c in by_community %}
-  <a class="com-row" href="{{ url_for('index', month=month, community=c.community) }}">
+  <a class="com-row" href="{{ url_for('index', community=c.community, **q) }}">
     <span class="rank-badge {{ 'rank-top' if loop.index == 1 else '' }}">{{ loop.index }}</span>
     <span class="ellipsis com-name">{{ c.community }}</span>
     <b class="com-count">{{ c.c }}件</b>
     <span class="chev">›</span>
   </a>
   {% else %}
-  <p class="muted small center">该月暂无巡查记录</p>
+  <p class="muted small center">该时段暂无巡查记录</p>
   {% endfor %}
 </div>
 
 <div id="panel-case" class="panel hidden">
+  <p class="muted small center">案件没有结案时间，始终按登记时间统计</p>
   {% if case_total %}
-  <a class="com-row" href="{{ url_for('cases', month=month) }}">
-    <span class="com-name">本月全部案件</span>
+  <a class="com-row" href="{{ url_for('cases', start=start, end=end) }}">
+    <span class="com-name">时段内全部案件</span>
     <b class="com-count">{{ case_total }}件</b>
     <span class="chev">›</span>
   </a>
@@ -85,20 +102,20 @@
   <div class="case-chips">
     {% for p in case_by_progress %}
     {% set cls = 'chip-blue' if p.progress == 'investigating' else ('chip-orange' if p.progress == 'filed' else 'chip-green') %}
-    <a class="case-chip {{ cls }}" href="{{ url_for('cases', month=month, progress=p.progress) }}">
+    <a class="case-chip {{ cls }}" href="{{ url_for('cases', start=start, end=end, progress=p.progress) }}">
       <b>{{ p.c }}</b><span>{{ progress_labels.get(p.progress, p.progress) }}</span>
     </a>
     {% endfor %}
   </div>
   {% for t in case_by_town %}
-  <a class="com-row" href="{{ url_for('cases', month=month, town=t.town) }}">
+  <a class="com-row" href="{{ url_for('cases', start=start, end=end, town=t.town) }}">
     <span class="ellipsis com-name">{{ t.town }}</span>
     <b class="com-count">{{ t.c }}件</b>
     <span class="chev">›</span>
   </a>
   {% endfor %}
   {% else %}
-  <p class="muted small center">该月暂无案件</p>
+  <p class="muted small center">该时段暂无案件</p>
   {% endif %}
 </div>
 {% endblock %}
@@ -108,5 +125,6 @@
   <a class="tab" href="{{ url_for('index') }}">巡查</a>
   <a class="tab" href="{{ url_for('cases') }}">案件</a>
   <a class="tab active" href="{{ url_for('stats') }}">统计</a>
+  <a class="tab" href="{{ url_for('export_ledger') }}">台账</a>
 </nav>
 {% endblock %}

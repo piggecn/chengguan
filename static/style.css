@@ -323,17 +323,9 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
   background: var(--primary-bg); color: var(--primary); font-size: 13px;
 }
 .filter-note a { color: var(--primary); font-weight: 600; }
-.export-row {
-  padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 8px;
-}
 .export-label { font-size: 13px; color: var(--muted); }
 .export-fields { align-items: center; }
 .export-date { min-height: 38px; font-size: 14px; flex: 1; padding: 6px 8px; }
-.export-panel {
-  display: flex; flex-direction: column; gap: 8px;
-  background: #f8fafc; border-radius: 10px; padding: 10px 12px;
-}
 .pin-wrap { display: flex; gap: 10px; justify-content: center; }
 .pin-box {
   width: 52px; height: 60px; font-size: 28px; text-align: center;
@@ -408,10 +400,6 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
 }
 .filter-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .filter-grid .input { font-size: 13px; min-height: 38px; padding: 6px 8px; }
-.export-inline {
-  display: flex; flex-direction: column; gap: 8px;
-  background: #f8fafc; border-radius: 10px; padding: 10px 12px;
-}
 
 /* 首页头部：手机端给右上角头像让位 */
 .header { padding-right: 64px; }
@@ -486,7 +474,6 @@ a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity
     display: flex; flex-wrap: wrap; gap: 8px; flex: 1;
   }
   .filter-grid .input { width: auto; min-width: 130px; }
-  .export-inline { flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; }
 
   /* 列表：手机卡片隐藏、桌面表格显示 */
   .list-mobile { display: none; }
