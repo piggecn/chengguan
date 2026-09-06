@@ -1,5 +1,5 @@
 // 网络优先：页面与接口永远拿最新数据；静态资源失败时回退缓存
-const CACHE = "chengguan-v2";
+const CACHE = "chengguan-v3";
 const SHELL = [
   "/static/style.css",
   "/static/app.js",

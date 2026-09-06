@@ -1,4 +1,4 @@
-// 社区城管巡查 — 前端脚本：四格密码登录 + 小区自动补全 + 离线暂存队列 + PWA
+// 城管台账 — 前端脚本：四格密码登录 + 小区自动补全 + 离线暂存队列 + PWA
 (function () {
   "use strict";
 
@@ -168,7 +168,7 @@
     }
   }
 
-  // ---------- 照片数量提示 ----------
+  // ---------- 照片预览 + 粘贴导入 ----------
   var photoInputs = document.querySelectorAll('input[type="file"][name="photos"]');
   photoInputs.forEach(function (input) {
     var hint = document.getElementById("photo-hint");
@@ -207,6 +207,22 @@
         hint.textContent = files.length > 0 ? "已选 " + files.length + " 张照片" : "未选择照片";
       }
     }
+    // 并进来一批图片，回填到 input.files（提交表单时才随 multipart 上传）
+    function addFiles(list) {
+      var n = 0;
+      for (var i = 0; i < list.length; i++) {
+        var f = list[i];
+        if (f && f.type.indexOf("image/") === 0) { files.push(f); n++; }
+      }
+      if (!n) { return 0; }
+      syncInput();
+      render();
+      if (hint) {
+        hint.textContent = "已加入 " + n + " 张 · 共 " + files.length + " 张";
+      }
+      return n;
+    }
+    input.__addPhotoFiles = addFiles;
     input.addEventListener("change", function () {
       for (var i = 0; i < input.files.length; i++) {
         files.push(input.files[i]);
@@ -214,6 +230,29 @@
       syncInput();
       render();
     });
+  });
+
+  // 电脑端从微信复制图片后，聚焦本页直接 Ctrl+V / ⌘V 就能贴进来。
+  // 手机端浏览器和 APK 内嵌浏览器拿不到系统剪贴板图片，这条只对桌面端有效。
+  document.addEventListener("paste", function (e) {
+    if (!photoInputs.length) { return; }
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    var images = [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind !== "file") { continue; }
+      var f = items[i].getAsFile();
+      if (!f || f.type.indexOf("image/") !== 0) { continue; }
+      // 剪贴板里的图经常没有文件名，没有名的会被后端 save_photos 当空跳过
+      if (!f.name) {
+        try {
+          f = new File([f], "照片_" + Date.now() + ".png", { type: f.type });
+        } catch (err) { /* 不支持 File 构造器的老浏览器，原样传 */ }
+      }
+      images.push(f);
+    }
+    if (!images.length) { return; }   // 纯文本粘贴交回浏览器默认处理
+    e.preventDefault();
+    photoInputs[photoInputs.length - 1].__addPhotoFiles(images);
   });
 
   // ---------- 离线暂存队列（IndexedDB） ----------

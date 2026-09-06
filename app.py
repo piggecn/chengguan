@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""社区城管日常巡查记录平台 — Flask 主程序。
+"""城管台账 — 单账号社区城管巡查台账，Flask 主程序。
 
 移动端优先 · 单账号登录 · 按两个乡镇（饶州街道 / 鄱阳镇）归类 · SQLite 单文件 · 原图保留。
 """
@@ -42,7 +42,6 @@ CATEGORIES = [
     "流动摊贩", "出店经营", "毁坏绿化", "占道经营",
     "破坏市政设施", "乱倒垃圾", "噪音扰民", "投诉纠纷", "其他",
 ]
-PROGRESS_LABELS = {"investigating": "调查中", "filed": "已立案", "closed": "已办结"}
 
 
 def town_of(value):
@@ -172,6 +171,8 @@ def init_db():
             name TEXT NOT NULL UNIQUE,
             count INTEGER NOT NULL DEFAULT 1
         );
+        -- 案件功能已去掉（改个人台账后不再录入案件），表保留只为不丢老数据；
+        -- 备份是整库导出，老案件数据仍在里面。
         CREATE TABLE IF NOT EXISTS cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             town TEXT NOT NULL,
@@ -663,7 +664,6 @@ def detail(rid):
     before = [dict(i) for i in images if i["type"] == "before"]
     after = [dict(i) for i in images if i["type"] == "after"]
     return render_template("detail.html", r=r, before=before, after=after,
-                           progress_labels=PROGRESS_LABELS,
                            user=current_user())
 
 
@@ -777,119 +777,6 @@ def close(rid):
     return render_template("close.html", r=r, error=None)
 
 
-# ---------- 案件 ----------
-@app.route("/cases", methods=["GET", "POST"])
-@require_user
-def cases():
-    if request.method == "POST":
-        town = (request.form.get("town") or "").strip()
-        case_no = (request.form.get("case_no") or "").strip()
-        case_name = (request.form.get("case_name") or "").strip()
-        progress = request.form.get("progress", "investigating")
-        fine = request.form.get("fine_amount", "0").strip() or "0"
-        if town not in TOWNS or not case_name:
-            return render_template(
-                "cases.html", error="乡镇和案件名称要填", rows=[],
-                progress_labels=PROGRESS_LABELS,
-            ), 400
-        get_db().execute(
-            "INSERT INTO cases(town, case_no, case_name, progress, "
-            "fine_amount, reporter, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (town, case_no, case_name, progress, float(fine),
-             current_user()["name"], now(), now()),
-        )
-        get_db().commit()
-        log_action("登记案件", f"{town} · {case_name}")
-        return redirect(url_for("cases"))
-
-    town_q = (request.args.get("town") or request.args.get("team") or "").strip()
-    progress_q = request.args.get("progress", "")
-    month = request.args.get("month", "")
-
-    where, params = "", []
-    if town_q in TOWNS:
-        where, params = "town = ?", [town_q]
-    if progress_q in PROGRESS_LABELS:
-        where = (where + " AND " if where else "") + "progress = ?"
-        params.append(progress_q)
-    if month:
-        where = (where + " AND " if where else "") + "created_at LIKE ?"
-        params.append(month + "%")
-    # 统计页带起止日期下钻过来时也要认，否则这里会静默退回按月的口径
-    for key in ("start", "end"):
-        val = (request.args.get(key) or "").strip()
-        if not val:
-            continue
-        op = ">=" if key == "start" else "<="
-        where = (where + " AND " if where else "") + f"created_at {op} ?"
-        params.append(val + (" 00:00" if key == "start" else " 23:59"))
-    sql = "SELECT * FROM cases" + (" WHERE " + where if where else "")
-    sql += " ORDER BY id DESC"
-    rows = get_db().execute(sql, params).fetchall()
-    return render_template("cases.html", error=None, rows=rows,
-                           progress_labels=PROGRESS_LABELS,
-                           sel={"town": town_q, "progress": progress_q,
-                                "month": month,
-                                "start": (request.args.get("start") or "").strip(),
-                                "end": (request.args.get("end") or "").strip()})
-
-
-@app.route("/case/<int:cid>/update", methods=["POST"])
-@require_user
-def case_update(cid):
-    c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
-    progress = request.form.get("progress", "investigating")
-    fine = (request.form.get("fine_amount") or "").strip() or "0"
-    db = get_db()
-    db.execute(
-        "UPDATE cases SET progress=?, fine_amount=?, updated_at=? WHERE id=?",
-        (progress, float(fine), now(), cid),
-    )
-    db.commit()
-    log_action("更新案件", f"案件#{cid} 进度={progress} 罚款={fine}")
-    return redirect(url_for("cases"))
-
-
-@app.route("/case/<int:cid>/edit", methods=["GET", "POST"])
-@require_user
-def case_edit(cid):
-    c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
-    if not c:
-        abort(404)
-    if request.method == "POST":
-        town = (request.form.get("town") or "").strip()
-        case_no = (request.form.get("case_no") or "").strip()
-        case_name = (request.form.get("case_name") or "").strip()
-        fine = (request.form.get("fine_amount") or "").strip() or "0"
-        if town not in TOWNS or not case_name:
-            return render_template("case_edit.html", c=c,
-                                   error="乡镇和案件名称要填"), 400
-        db = get_db()
-        db.execute(
-            "UPDATE cases SET town=?, case_no=?, case_name=?, fine_amount=?, "
-            "updated_at=? WHERE id=?",
-            (town, case_no, case_name, float(fine), now(), cid),
-        )
-        db.commit()
-        log_action("编辑案件", f"案件#{cid} {case_name}")
-        return redirect(url_for("cases"))
-    return render_template("case_edit.html", c=c, error=None)
-
-
-@app.route("/case/<int:cid>/delete", methods=["POST"])
-@require_user
-def case_delete(cid):
-    c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
-    if not c:
-        abort(404)
-    get_db().execute("DELETE FROM cases WHERE id=?", (cid,))
-    get_db().commit()
-    log_action("删除案件", f"案件#{cid} {c['case_name']}")
-    flash("案件已删除", "ok")
-    return redirect(url_for("cases"))
-
-
 # ---------- 统计 ----------
 # 时间口径：create 按录入时间；smart 智能（已结案按结案时间、未结案按录入时间）；
 # close 按结案时间。默认 smart —— 一条记录算在它该算的时段里。
@@ -964,31 +851,6 @@ def stats():
             "FROM records WHERE " + scope + " AND status='closed'", params,
         ).fetchone()["d"]
 
-    # 案件没有结案时间，始终按登记时间
-    ccond, cparams = [], []
-    if town in TOWNS:
-        ccond.append("town = ?")
-        cparams.append(town)
-    if start:
-        ccond.append("created_at >= ?")
-        cparams.append(start + " 00:00")
-    if end:
-        ccond.append("created_at <= ?")
-        cparams.append(end + " 23:59")
-    cscope = " AND ".join(ccond)
-
-    case_total = db.execute(
-        "SELECT COUNT(*) c FROM cases WHERE " + cscope, cparams).fetchone()["c"]
-    case_fine = db.execute(
-        "SELECT COALESCE(SUM(fine_amount),0) s FROM cases WHERE " + cscope, cparams,
-    ).fetchone()["s"]
-    case_by_progress = db.execute(
-        "SELECT progress, COUNT(*) c FROM cases WHERE " + cscope +
-        " GROUP BY progress", cparams).fetchall()
-    case_by_town = db.execute(
-        "SELECT town, COUNT(*) c FROM cases WHERE " + cscope +
-        " GROUP BY town", cparams).fetchall()
-
     if basis == "close":
         labels = ("本期结案", "截至未结", "平均办理天数")
     elif basis == "smart":
@@ -1003,9 +865,6 @@ def stats():
         rate=round(closed / total * 100, 1) if total else 0,
         backlog=backlog, avg_days=avg_days,
         by_town=by_town, by_category=by_category, by_community=by_community,
-        case_total=case_total, case_fine=case_fine,
-        case_by_progress=case_by_progress, case_by_town=case_by_town,
-        progress_labels=PROGRESS_LABELS,
         sel={"town": town if town in TOWNS else ""},
         q={"start": start, "end": end, "basis": basis},
     )

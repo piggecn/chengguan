@@ -29,7 +29,7 @@
 {% endif %}
 </div>
 
-{% if total == 0 and case_total == 0 %}
+{% if total == 0 %}
 <p class="empty">该时段暂无数据，换个时间段或口径看看</p>
 {% endif %}
 
@@ -37,7 +37,6 @@
   <button type="button" class="tab-btn active" data-tab="panel-town">按乡镇</button>
   <button type="button" class="tab-btn" data-tab="panel-cat">按问题</button>
   <button type="button" class="tab-btn" data-tab="panel-com">小区排行</button>
-  <button type="button" class="tab-btn" data-tab="panel-case">案件</button>
 </div>
 <p class="tabs-hint muted small">点任意一块数字可查看对应记录明细</p>
 
@@ -90,40 +89,11 @@
   {% endfor %}
 </div>
 
-<div id="panel-case" class="panel hidden">
-  <p class="muted small center">案件没有结案时间，始终按登记时间统计</p>
-  {% if case_total %}
-  <a class="com-row" href="{{ url_for('cases', start=start, end=end) }}">
-    <span class="com-name">时段内全部案件</span>
-    <b class="com-count">{{ case_total }}件</b>
-    <span class="chev">›</span>
-  </a>
-  <p class="case-total-line">共 <b>{{ case_total }}</b> 件 · 罚款合计 <b>¥{{ case_fine }}</b></p>
-  <div class="case-chips">
-    {% for p in case_by_progress %}
-    {% set cls = 'chip-blue' if p.progress == 'investigating' else ('chip-orange' if p.progress == 'filed' else 'chip-green') %}
-    <a class="case-chip {{ cls }}" href="{{ url_for('cases', start=start, end=end, progress=p.progress) }}">
-      <b>{{ p.c }}</b><span>{{ progress_labels.get(p.progress, p.progress) }}</span>
-    </a>
-    {% endfor %}
-  </div>
-  {% for t in case_by_town %}
-  <a class="com-row" href="{{ url_for('cases', start=start, end=end, town=t.town) }}">
-    <span class="ellipsis com-name">{{ t.town }}</span>
-    <b class="com-count">{{ t.c }}件</b>
-    <span class="chev">›</span>
-  </a>
-  {% endfor %}
-  {% else %}
-  <p class="muted small center">该时段暂无案件</p>
-  {% endif %}
-</div>
 {% endblock %}
 
 {% block nav %}
 <nav class="tabbar">
   <a class="tab" href="{{ url_for('index') }}">巡查</a>
-  <a class="tab" href="{{ url_for('cases') }}">案件</a>
   <a class="tab active" href="{{ url_for('stats') }}">统计</a>
   <a class="tab" href="{{ url_for('export_ledger') }}">台账</a>
 </nav>

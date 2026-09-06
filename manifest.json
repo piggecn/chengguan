@@ -1,7 +1,7 @@
 {
-  "name": "社区城管巡查",
-  "short_name": "城管巡查",
-  "description": "社区城管日常巡查记录平台",
+  "name": "城管台账",
+  "short_name": "城管台账",
+  "description": "社区城管巡查台账",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

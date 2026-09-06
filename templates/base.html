@@ -8,9 +8,9 @@
 <meta name="theme-color" content="#1a73e8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="城管巡查">
+<meta name="apple-mobile-web-app-title" content="城管台账">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
-<title>{% block title %}社区城管巡查{% endblock %}</title>
+<title>{% block title %}城管台账{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -34,11 +34,10 @@
   <div class="topnav-inner">
     <a class="tn-brand" href="{{ url_for('index') }}">
       <img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
-      <span>社区城管巡查</span>
+      <span>城管台账</span>
     </a>
     <div class="tn-links">
       <a class="{{ 'active' if request.endpoint == 'index' }}" href="{{ url_for('index') }}">巡查</a>
-      <a class="{{ 'active' if request.endpoint in ('cases', 'case_edit') }}" href="{{ url_for('cases') }}">案件</a>
       <a class="{{ 'active' if request.endpoint == 'stats' }}" href="{{ url_for('stats') }}">统计</a>
       <a class="{{ 'active' if request.endpoint in ('export_ledger', 'export_ledger_xlsx') }}"
          href="{{ url_for('export_ledger') }}">台账导出</a>

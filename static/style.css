@@ -150,11 +150,6 @@ label .input { margin-top: 4px; }
 }
 .log-item:last-child { border-bottom: none; }
 
-/* 案件行内编辑 */
-.case-row { display: block; }
-.inline-form { margin-top: 10px; }
-.inline-form .input { min-height: 40px; font-size: 14px; }
-
 /* 统计表 */
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th { background: var(--primary-bg); color: #1557b0; text-align: left; padding: 8px 10px; }
@@ -258,17 +253,6 @@ label .input { margin-top: 4px; }
   display: inline-flex; align-items: center; justify-content: center;
 }
 .rank-badge.rank-top { background: var(--warning-bg); color: #b06000; }
-.case-total-line { font-size: 14px; color: #555; margin-bottom: 10px; }
-.case-total-line b { color: var(--primary); font-size: 16px; }
-.case-chips { display: flex; gap: 8px; margin-bottom: 14px; }
-.case-chip {
-  flex: 1; text-align: center; padding: 10px 4px; border-radius: 10px;
-}
-.case-chip b { display: block; font-size: 20px; }
-.case-chip span { font-size: 12px; opacity: .85; }
-.chip-blue { background: var(--primary-bg); color: var(--primary); }
-.chip-orange { background: var(--warning-bg); color: #b06000; }
-.chip-green { background: var(--success-bg); color: #137333; }
 
 /* 统计页选项卡版 */
 .tabs {
@@ -313,7 +297,7 @@ label .input { margin-top: 4px; }
 .com-name { flex: 1; }
 .com-count { color: var(--primary); white-space: nowrap; }
 .chev { color: #c0c6cf; font-size: 20px; line-height: 1; flex-shrink: 0; }
-a.team-card, a.cat-chip, a.com-row, a.case-chip, a.stat {
+a.team-card, a.cat-chip, a.com-row, a.stat {
   display: block; text-decoration: none; color: inherit;
 }
 a.team-card:active, a.com-row:active, a.cat-chip:active, a.stat:active { opacity: .85; }
