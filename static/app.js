@@ -1,4 +1,4 @@
-// 社区城管巡查 — 前端脚本：登录（选单位→选人→四格密码）+ 小区自动补全 + 离线暂存队列 + PWA
+// 社区城管巡查 — 前端脚本：四格密码登录 + 小区自动补全 + 离线暂存队列 + PWA
 (function () {
   "use strict";
 
@@ -25,116 +25,45 @@
     });
   }
 
-  // ---------- 登录页：选单位 → 加载该单位人员 ----------
-  var unitSel = document.getElementById("unit");
-  var nameSel = document.getElementById("name");
+  // ---------- 登录页：四格密码 ----------
+  // 不再有选单位/选姓名，也不再支持把密码塞进分享链接自动登录——
+  // 那样密码会落在双方浏览器历史和聊天记录里。
   var loginBoxes = document.querySelectorAll(".pin-box");
-  var loginForm = document.getElementById("login-form");
   var pinHidden = document.getElementById("pin");
-  var urlParams = new URLSearchParams(location.search);
-  var shareUnit = urlParams.get("unit") || "";
-  var shareName = urlParams.get("name") || "";
-  var sharePin = urlParams.get("pin") || "";
 
-  if (unitSel && nameSel) {
-    var rememberedUnit = null, rememberedName = null;
-    try {
-      rememberedUnit = localStorage.getItem("cg-unit") || "";
-      rememberedName = localStorage.getItem("cg-name") || "";
-    } catch (e) { /* 隐私模式忽略 */ }
+  if (loginBoxes.length) {
+    var form = pinHidden ? pinHidden.closest("form") : null;
 
-    function fillPinBoxes(pin) {
-      if (!/^\d{4}$/.test(pin || "")) { return false; }
-      loginBoxes.forEach(function (b, i) { b.value = pin[i]; });
-      pinHidden.value = pin;
-      return true;
-    }
-
-    function tryAutoLogin() {
-      if (fillPinBoxes(sharePin)) {
-        setTimeout(function () {
-          try {
-            localStorage.setItem("cg-unit", unitSel.value);
-            localStorage.setItem("cg-name", nameSel.value);
-          } catch (e) { /* ignore */ }
-          loginForm.submit();
-        }, 200);
-      }
-    }
-
-    function loadNames(unit, cb) {
-      nameSel.disabled = true;
-      nameSel.innerHTML = '<option value="">加载中…</option>';
-      fetch("/api/users?unit=" + encodeURIComponent(unit))
-        .then(function (r) { return r.json(); })
-        .then(function (names) {
-          nameSel.innerHTML = '<option value="">② 请选择姓名</option>';
-          names.forEach(function (n) {
-            var opt = document.createElement("option");
-            opt.value = n;
-            opt.textContent = n;
-            nameSel.appendChild(opt);
-          });
-          nameSel.disabled = false;
-          var want = shareName || rememberedName;
-          if (want) { nameSel.value = want; }
-          if (cb) { cb(); }
-        })
-        .catch(function () {
-          nameSel.innerHTML = '<option value="">加载失败，请重选单位</option>';
-        });
-    }
-
-    if (shareUnit || rememberedUnit) {
-      unitSel.value = shareUnit || rememberedUnit;
-      loadNames(unitSel.value, function () {
-        if (shareUnit && shareName && sharePin) { tryAutoLogin(); }
-      });
-    }
-    unitSel.addEventListener("change", function () {
-      loadNames(unitSel.value);
-    });
-
-    // 四格密码：自动跳格、退格回跳；只有真实键盘输入（非浏览器自动填充）才自动登录
-    var boxes = loginBoxes;
-    var form = loginForm;
-    boxes.forEach(function (box, idx) {
-      box.addEventListener("input", function (e) {
-        var manual = (e && (e.inputType === "insertText" || e.inputType === "insertFromPaste"));
+    loginBoxes.forEach(function (box, idx) {
+      box.addEventListener("input", function () {
         box.value = box.value.replace(/\D/g, "").slice(0, 1);
-        if (box.value && idx < boxes.length - 1) {
-          boxes[idx + 1].focus();
+        if (box.value && idx < loginBoxes.length - 1) {
+          loginBoxes[idx + 1].focus();
         }
-        if (idx === boxes.length - 1 && manual) {
+        if (idx === loginBoxes.length - 1 && box.value) {
           var all = true;
-          boxes.forEach(function (b) { if (!b.value) all = false; });
+          loginBoxes.forEach(function (b) { if (!b.value) all = false; });
           if (all) {
             var pin = "";
-            boxes.forEach(function (b) { pin += b.value; });
+            loginBoxes.forEach(function (b) { pin += b.value; });
             pinHidden.value = pin;
-            try {
-              localStorage.setItem("cg-unit", unitSel.value);
-              localStorage.setItem("cg-name", nameSel.value);
-            } catch (e2) { /* ignore */ }
-            form.submit();
+            if (form) { form.submit(); }
           }
         }
       });
       box.addEventListener("keydown", function (e) {
         if (e.key === "Backspace" && !box.value && idx > 0) {
-          boxes[idx - 1].focus();
+          loginBoxes[idx - 1].focus();
         }
       });
     });
-    form.addEventListener("submit", function () {
-      var pin = "";
-      boxes.forEach(function (b) { pin += b.value; });
-      pinHidden.value = pin;
-      try {
-        localStorage.setItem("cg-unit", unitSel.value);
-        localStorage.setItem("cg-name", nameSel.value);
-      } catch (e) { /* ignore */ }
-    });
+    if (form) {
+      form.addEventListener("submit", function () {
+        var pin = "";
+        loginBoxes.forEach(function (b) { pin += b.value; });
+        pinHidden.value = pin;
+      });
+    }
   }
 
   // ---------- 统计页选项卡切换 ----------
@@ -160,7 +89,7 @@
   var filterForm = document.querySelector("form.filter-form") || document.querySelector("form.filter-row");
   function buildExportUrl(path) {
     var params = new URLSearchParams();
-    ["team", "category", "reporter", "status"].forEach(function (k) {
+    ["town", "category", "community", "month", "status"].forEach(function (k) {
       if (filterForm && filterForm.elements[k] && filterForm.elements[k].value) {
         params.set(k, filterForm.elements[k].value);
       }
@@ -243,19 +172,6 @@
       }
     });
   });
-
-  // ---------- 账号管理页：办公室角色显示职务选择 ----------
-  var addRole = document.getElementById("add-role");
-  var titleField = document.getElementById("title-field");
-  if (addRole && titleField) {
-    addRole.addEventListener("change", function () {
-      if (addRole.value === "office") {
-        titleField.classList.remove("hidden");
-      } else {
-        titleField.classList.add("hidden");
-      }
-    });
-  }
 
   // ---------- 小区自动补全 ----------
   var datalist = document.getElementById("community-list");
@@ -403,7 +319,7 @@
   }
 
   function isLoginPage(url) {
-    return /\/personnel/.test(url || "");
+    return /\/login/.test(url || "");
   }
 
   // 拦截表单提交：登录过期/服务端校验失败 → 提示原因；网络失败 → 存草稿

@@ -9,18 +9,8 @@
 <div class="center-card">
   <img class="logo-lg" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管">
   <h1 class="brand">社区城管巡查</h1>
-  <p class="sub">先选单位，再选姓名，最后输 4 位密码</p>
-  <form method="post" id="login-form" class="stack" autocomplete="off">
-    <select name="unit" id="unit" class="input" required>
-      <option value="" disabled selected>① 请选择单位</option>
-      <option value="__super__">★ 单位管理员（主管理员）</option>
-      {% for u in units %}
-      <option value="{{ u.name }}" data-kind="{{ u.kind }}">{{ u.name }}</option>
-      {% endfor %}
-    </select>
-    <select name="name" id="name" class="input" required disabled>
-      <option value="">② 先选单位</option>
-    </select>
+  <p class="sub">输入 4 位密码</p>
+  <form method="post" class="stack" autocomplete="off">
     <div class="pin-wrap">
       <input type="password" inputmode="numeric" pattern="[0-9]" maxlength="1"
              class="pin-box" autocomplete="one-time-code" aria-label="密码第1位">
@@ -32,7 +22,6 @@
              class="pin-box" autocomplete="one-time-code" aria-label="密码第4位">
       <input type="hidden" name="pin" id="pin">
     </div>
-    <p class="muted small center">③ 输入 4 位密码</p>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <button class="btn btn-primary" type="submit">开始使用</button>
   </form>

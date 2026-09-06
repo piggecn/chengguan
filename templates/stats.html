@@ -20,18 +20,18 @@
 {% endif %}
 
 <div class="tabs">
-  <button type="button" class="tab-btn active" data-tab="panel-team">按中队</button>
+  <button type="button" class="tab-btn active" data-tab="panel-town">按乡镇</button>
   <button type="button" class="tab-btn" data-tab="panel-cat">按问题</button>
   <button type="button" class="tab-btn" data-tab="panel-com">小区排行</button>
   <button type="button" class="tab-btn" data-tab="panel-case">案件</button>
 </div>
 <p class="tabs-hint muted small">点任意一块数字可查看对应记录明细</p>
 
-<div id="panel-team" class="panel">
-  {% for t in by_team %}
-  <a class="team-card" href="{{ url_for('index', month=month, team=t.team) }}">
+<div id="panel-town" class="panel">
+  {% for t in by_town %}
+  <a class="team-card" href="{{ url_for('index', month=month, town=t.town) }}">
     <div class="team-head">
-      <span class="ellipsis">{{ t.team }}</span>
+      <span class="ellipsis">{{ t.town }}</span>
       <span class="row gap">
         <b class="rate {{ 'rate-green' if t.c and t.closed == t.c else '' }}">{{ (t.closed * 100 // t.c) if t.c else 0 }}%</b>
         <span class="chev">›</span>
@@ -90,9 +90,9 @@
     </a>
     {% endfor %}
   </div>
-  {% for t in case_by_team %}
-  <a class="com-row" href="{{ url_for('cases', month=month, team=t.team) }}">
-    <span class="ellipsis com-name">{{ t.team }}</span>
+  {% for t in case_by_town %}
+  <a class="com-row" href="{{ url_for('cases', month=month, town=t.town) }}">
+    <span class="ellipsis com-name">{{ t.town }}</span>
     <b class="com-count">{{ t.c }}件</b>
     <span class="chev">›</span>
   </a>

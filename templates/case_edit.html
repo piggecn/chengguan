@@ -6,16 +6,12 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">编辑案件</h1></div>
 </header>
 <form method="post" class="card form tight">
-  <label>所属中队
-    {% if user.role in ('super', 'office') %}
-    <select name="team" class="input" required>
-      {% for t in teams %}
-      <option value="{{ t }}" {% if c.team == t %}selected{% endif %}>{{ t }}</option>
+  <label>所属乡镇
+    <select name="town" class="input" required>
+      {% for t in towns %}
+      <option value="{{ t }}" {% if c.town == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
-    {% else %}
-    <span class="input readonly">{{ c.team }}</span>
-    {% endif %}
   </label>
   <label>案件编号（可选）
     <input name="case_no" class="input" value="{{ c.case_no }}"

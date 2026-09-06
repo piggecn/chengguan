@@ -6,18 +6,13 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">新增巡查记录</h1></div>
 </header>
 <form method="post" enctype="multipart/form-data" class="form" data-draft="1">
-  <label>所属中队
-    {% if user.role in ('captain', 'vice-captain', 'member') %}
-    <span class="input readonly">{{ user.unit }}</span>
-    <input type="hidden" name="team" value="{{ user.unit }}">
-    {% else %}
-    <select name="team" class="input" required>
-      <option value="" disabled {{ 'selected' if not old else '' }}>请选择所属中队</option>
-      {% for t in teams %}
-      <option value="{{ t }}" {% if old and old.team == t %}selected{% endif %}>{{ t }}</option>
+  <label>所属乡镇
+    <select name="town" class="input" required>
+      <option value="" disabled {{ 'selected' if not old else '' }}>请选择所属乡镇</option>
+      {% for t in towns %}
+      <option value="{{ t }}" {% if old and old.town == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
-    {% endif %}
   </label>
   <label>小区名称（可不填，之后可编辑补全）
     <input name="community" class="input" list="community-list" placeholder="请输入小区名称，已录过会自动补全"

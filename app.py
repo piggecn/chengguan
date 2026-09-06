@@ -532,7 +532,11 @@ def index():
     this_month = datetime.now().strftime("%Y-%m")
 
     def count_where(extra="", extra_params=()):
-        w = where + (" AND " + extra if w and extra else w or extra)
+        """在当前筛选条件上再叠加一个条件计数。"""
+        if where and extra:
+            w = where + " AND " + extra
+        else:
+            w = where or extra
         sql2 = "SELECT COUNT(*) c FROM records"
         if w:
             sql2 += " WHERE " + w

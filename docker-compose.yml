@@ -5,10 +5,11 @@ services:
     ports:
       - "8755:5000"
     environment:
-      # 可选：留空则免登录；填了之后打开站点要先输这个密码
-      - ACCESS_PASSWORD=
-      # 会话签名密钥，正式使用请改成随机长字符串
-      - SECRET_KEY=please-change-me
+      # 主账号的 4 位密码。不填就是 0000，第一次登录后在「修改密码」页改掉。
+      - OWNER_PIN=
+      # 会话签名密钥。不填会自动生成并写到 ./data/.secret_key（权限 600）。
+      # 填了固定值也行，但换值会让所有人掉登录。
+      - SECRET_KEY=
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads

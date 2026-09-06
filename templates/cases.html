@@ -18,14 +18,12 @@
 
 <div id="case-list" class="panel">
   <form method="get" class="filter-row" onchange="this.submit()">
-    {% if can_all %}
-    <select name="team" class="input">
-      <option value="">全部中队</option>
-      {% for t in teams %}
-      <option value="{{ t }}" {% if sel.team == t %}selected{% endif %}>{{ t }}</option>
+    <select name="town" class="input">
+      <option value="">全部乡镇</option>
+      {% for t in towns %}
+      <option value="{{ t }}" {% if sel.town == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
-    {% endif %}
     <select name="progress" class="input">
       <option value="">全部进度</option>
       {% for k, v in progress_labels.items() %}
@@ -43,9 +41,9 @@
       <div class="card-body">
         <div class="row between">
           <b class="ellipsis">{% if c.case_no %}[{{ c.case_no }}] {% endif %}{{ c.case_name }}</b>
-          <span class="muted small">{{ c.team }}</span>
+          <span class="muted small">{{ c.town }}</span>
         </div>
-        <p class="muted small">{{ c.reporter }} · {{ c.created_at }}</p>
+        <p class="muted small">{{ c.created_at }}</p>
         <form method="post" action="{{ url_for('case_update', cid=c.id) }}" class="row gap inline-form">
           <select name="progress" class="input">
             {% for k, v in progress_labels.items() %}
@@ -73,18 +71,13 @@
 
 <div id="case-add" class="panel hidden">
   <form method="post" class="card form tight">
-    <label>所属中队
-      {% if user.role in ('captain', 'vice-captain', 'member') %}
-      <span class="input readonly">{{ user.unit }}</span>
-      <input type="hidden" name="team" value="{{ user.unit }}">
-      {% else %}
-      <select name="team" class="input" required>
-        <option value="" disabled selected>请选择所属中队</option>
-        {% for t in teams %}
+    <label>所属乡镇
+      <select name="town" class="input" required>
+        <option value="" disabled selected>请选择所属乡镇</option>
+        {% for t in towns %}
         <option value="{{ t }}">{{ t }}</option>
         {% endfor %}
       </select>
-      {% endif %}
     </label>
     <label>案件编号（可选）
       <input name="case_no" class="input" placeholder="如：鄱城立字〔2026〕第001号">

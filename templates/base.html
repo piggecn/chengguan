@@ -21,13 +21,11 @@
     <span class="avatar">{{ user.name[0] }}</span>
     <div class="am-info">
       <b>{{ user.name }}</b>
-      <span class="muted small">{% if role_labels.get(user.role, user.role) != user.name %}{{ role_labels.get(user.role, user.role) }} · {% endif %}{% if user.unit %}{{ user.unit }}{% else %}单位管理员{% endif %}</span>
+      <span class="muted small">主账号</span>
     </div>
   </div>
   <a href="{{ url_for('password') }}">修改密码</a>
-  {% if user.role in ('super', 'office', 'captain') %}
-  <a href="{{ url_for('admin') }}">账号管理</a>
-  {% endif %}
+  <a href="{{ url_for('backup') }}">下载备份</a>
   <a href="{{ url_for('logout') }}">退出登录</a>
 </div>
 {% endmacro %}
@@ -48,7 +46,7 @@
     <div class="tn-account">
       <button type="button" class="tn-avatar" id="account-btn-d" aria-label="账户">
         <span class="avatar">{{ user.name[0] }}</span>
-        <span class="tn-name">{{ user.name }}{% if role_labels.get(user.role, user.role) != user.name %} · {{ role_labels.get(user.role, user.role) }}{% endif %}</span>
+        <span class="tn-name">{{ user.name }}</span>
         <span class="tn-caret">▾</span>
       </button>
       {{ account_menu('account-menu-d') }}

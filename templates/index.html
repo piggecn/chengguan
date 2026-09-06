@@ -42,28 +42,18 @@
   </div>
   <div id="filter-panel" class="filter-panel hidden">
     <div class="filter-grid">
-      {% if can_all %}
-      <select name="team" class="input" onchange="this.form.submit()">
-        <option value="">全部中队</option>
-        {% for t in team_options %}
-        <option value="{{ t }}" {% if sel.team == t %}selected{% endif %}>{{ t }}</option>
+      <select name="town" class="input" onchange="this.form.submit()">
+        <option value="">全部乡镇</option>
+        {% for t in towns %}
+        <option value="{{ t }}" {% if sel.town == t %}selected{% endif %}>{{ t }}</option>
         {% endfor %}
       </select>
-      {% endif %}
       <select name="category" class="input" onchange="this.form.submit()">
         <option value="">全部分类</option>
         {% for c in categories %}
         <option value="{{ c }}" {% if sel.category == c %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
       </select>
-      {% if reporter_options %}
-      <select name="reporter" class="input" onchange="this.form.submit()">
-        <option value="">全部人员</option>
-        {% for n in reporter_options %}
-        <option value="{{ n }}" {% if sel.reporter == n %}selected{% endif %}>{{ n }}</option>
-        {% endfor %}
-      </select>
-      {% endif %}
       <select name="status" class="input" onchange="this.form.submit()">
         <option value="">全部状态</option>
         <option value="pending" {% if sel.status == 'pending' %}selected{% endif %}>待处理</option>
@@ -113,7 +103,7 @@
             {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
         </span>
       </div>
-      <p class="muted small">{{ r.team }} · {{ r.reporter }} · {{ r.created_at }}</p>
+      <p class="muted small">{{ r.town }} · {{ r.created_at }}</p>
       <p class="muted desc-wrap">{{ r.description }}</p>
     </div>
   </a>
@@ -129,9 +119,9 @@
       <tr>
         <th class="col-thumb"></th>
         <th>小区</th>
+        <th>乡镇</th>
         <th>分类</th>
         <th>问题描述</th>
-        <th>上报人</th>
         <th>时间</th>
         <th>状态</th>
         <th>操作</th>
@@ -148,9 +138,9 @@
           {% endif %}
         </td>
         <td><b>{{ r.community or '未填小区' }}</b></td>
+        <td>{{ r.town }}</td>
         <td>{{ r.category }}</td>
         <td class="col-desc"><span class="desc-wrap">{{ r.description }}</span></td>
-        <td>{{ r.reporter }}<p class="muted small">{{ r.team }}</p></td>
         <td class="muted small">{{ r.created_at }}</td>
         <td>
           <span class="row gap">

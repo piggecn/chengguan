@@ -6,17 +6,12 @@
   <div class="row gap title-row"><img class="logo-sm" src="{{ url_for('static', filename='img/logo.png') }}" alt="城管"><h1 class="title">编辑巡查记录</h1></div>
 </header>
 <form method="post" enctype="multipart/form-data" class="form">
-  <label>所属中队
-    {% if user.role in ('captain', 'vice-captain', 'member') %}
-    <span class="input readonly">{{ user.unit }}</span>
-    <input type="hidden" name="team" value="{{ user.unit }}">
-    {% else %}
-    <select name="team" class="input" required>
-      {% for t in teams %}
-      <option value="{{ t }}" {% if r.team == t %}selected{% endif %}>{{ t }}</option>
+  <label>所属乡镇
+    <select name="town" class="input" required>
+      {% for t in towns %}
+      <option value="{{ t }}" {% if r.town == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
-    {% endif %}
   </label>
   <label>小区名称（可不填）
     <input name="community" class="input" list="community-list" value="{{ r.community }}" autocomplete="off">
