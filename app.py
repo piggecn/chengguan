@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """社区城管日常巡查记录平台 — Flask 主程序。
 
-移动端优先 · 账号角色权限（主管理员/办公室/中队长/队员） · SQLite 单文件 · 原图保留。
+移动端优先 · 单账号登录 · 按两个乡镇（饶州街道 / 鄱阳镇）归类 · SQLite 单文件 · 原图保留。
 """
 import io
 import os
@@ -27,84 +27,30 @@ UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(BASE_DIR / "uploads")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "").strip()
+# 主账号的 4 位密码：首次初始化写死 0000，改密在「修改密码」页
+OWNER_PIN = os.environ.get("OWNER_PIN", "0000").strip() or "0000"
 
 # ---------- 常量配置（增改一处全局生效） ----------
-TEAMS = [
-    "鄱阳镇社区一中队", "鄱阳镇社区二中队",
-    "饶州街道社区一中队", "饶州街道社区二中队",
-]
+# 组织结构只有两个乡镇：填写、统计、导出都按这两类
+TOWNS = ["饶州街道", "鄱阳镇"]
 
+# 老库里 team 存的是中队名，迁移时按前缀归到乡镇
+TEAM_TO_TOWN = {"鄱阳镇": "鄱阳镇", "饶州街道": "饶州街道"}
 
-def get_units(kind=None):
-    """单位列表（units 表，主管理员可维护）。kind: team/office/None(全部)。"""
-    db = get_db()
-    if kind:
-        rows = db.execute(
-            "SELECT * FROM units WHERE kind=? ORDER BY sort, id", (kind,)
-        ).fetchall()
-    else:
-        rows = db.execute("SELECT * FROM units ORDER BY sort, id").fetchall()
-    return [dict(r) for r in rows]
-
-
-def team_units():
-    return [u["name"] for u in get_units("team")]
-
-
-def office_units():
-    return [u["name"] for u in get_units("office")]
-
-
-def all_unit_names():
-    return [u["name"] for u in get_units()]
-
-
-def login_units():
-    """登录页单位下拉：只列已有账号的单位（跟随账号管理页建的号）。"""
-    rows = get_db().execute(
-        "SELECT DISTINCT unit FROM users WHERE unit != '' AND role != 'super'"
-    ).fetchall()
-    with_acc = {r["unit"] for r in rows}
-    return [u for u in get_units() if u["name"] in with_acc]
-
-
-def unit_kind(name):
-    row = get_db().execute(
-        "SELECT kind FROM units WHERE name=?", (name,)
-    ).fetchone()
-    return row["kind"] if row else None
-
-
-def town_units():
-    """中队单位里出现过的乡镇（去重保序），用于台账按乡镇分组/筛选。"""
-    towns = []
-    for u in get_units("team"):
-        if u["town"] and u["town"] not in towns:
-            towns.append(u["town"])
-    return towns
-
-
-# 单位列表由主管理员在账号管理页维护（units 表）；TEAMS 仅作为首次初始化种子
 CATEGORIES = [
     "违法搭建", "牛皮癣小广告", "乱堆放杂物", "电动车乱停放",
     "流动摊贩", "出店经营", "毁坏绿化", "占道经营",
     "破坏市政设施", "乱倒垃圾", "噪音扰民", "投诉纠纷", "其他",
 ]
 PROGRESS_LABELS = {"investigating": "调查中", "filed": "已立案", "closed": "已办结"}
-ROLE_LABELS = {"super": "主管理员", "office": "办公室管理员",
-               "captain": "中队长", "vice-captain": "副中队长", "member": "队员"}
-# 各角色可创建的账号角色
-ADD_ROLES = {
-    "super": [("captain", "中队长"), ("vice-captain", "副中队长"),
-              ("member", "队员"), ("office", "办公室管理员")],
-    "office": [("vice-captain", "副中队长"), ("member", "队员")],
-    "captain": [("vice-captain", "副中队长"), ("member", "队员")],
-}
 
 
-def random_pin() -> str:
-    return f"{secrets.randbelow(10000):04d}"
+def town_of(value):
+    """把老的中队名归到乡镇；已经是乡镇名或为空则原样返回。"""
+    for prefix, town in TEAM_TO_TOWN.items():
+        if value.startswith(prefix):
+            return town
+    return value
 
 
 def get_setting(key, default=""):
@@ -121,14 +67,6 @@ def set_setting(key, value):
         (key, value),
     )
     get_db().commit()
-
-
-def base_url():
-    """对外分享链接用的域名：主管理员在账号管理页配置，未配置则用当前访问域名。"""
-    u = (get_setting("base_url") or "").strip().rstrip("/")
-    if not u:
-        u = request.host_url.rstrip("/")
-    return u
 
 
 def log_action(action, detail):
@@ -148,11 +86,33 @@ app = Flask(__name__)
 
 @app.context_processor
 def inject_globals():
-    """所有模板可用：user（当前用户或 None）、role_labels。"""
-    return {"user": current_user(), "role_labels": ROLE_LABELS}
+    """所有模板可用：user（当前用户或 None）、towns（两个乡镇）。"""
+    return {"user": current_user(), "towns": TOWNS}
 
 
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "chengguan-local-dev-secret")
+def _load_secret_key():
+    """会话签名密钥：优先环境变量，没有就生成一个并落盘。
+
+    原来那个出厂默认值等于任何人都能伪造 session cookie，必须去掉。
+    落盘是为了重启后不用重新登录；设 SECRET_KEY 环境变量可覆盖。
+    """
+    env = os.environ.get("SECRET_KEY", "").strip()
+    if env:
+        return env
+    p = DATA_DIR / ".secret_key"
+    if p.exists() and p.read_text().strip():
+        return p.read_text().strip()
+    key = secrets.token_hex(32)
+    p.write_text(key)
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+    print(f"[init] 已生成会话密钥：{p}（设 SECRET_KEY 环境变量可覆盖）")
+    return key
+
+
+app.config["SECRET_KEY"] = _load_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=180)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 单次上传上限 100MB
 
@@ -179,22 +139,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            unit TEXT NOT NULL,
-            role TEXT NOT NULL,          -- super / office / captain / member
+            unit TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL,          -- 单账号：恒为 super
             title TEXT NOT NULL DEFAULT '',
             pin TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS units (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            kind TEXT NOT NULL DEFAULT 'team',  -- team=中队 / office=办公室
-            town TEXT NOT NULL DEFAULT '',
-            sort INTEGER NOT NULL DEFAULT 0
-        );
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team TEXT NOT NULL,
+            town TEXT NOT NULL,          -- 饶州街道 / 鄱阳镇
             community TEXT NOT NULL,
             category TEXT NOT NULL,
             description TEXT NOT NULL,
@@ -221,7 +174,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team TEXT NOT NULL,
+            town TEXT NOT NULL,
             case_no TEXT NOT NULL DEFAULT '',
             case_name TEXT NOT NULL,
             progress TEXT NOT NULL DEFAULT 'investigating',
@@ -271,22 +224,25 @@ def init_db():
             db.execute(
                 "ALTER TABLE users ADD COLUMN title TEXT NOT NULL DEFAULT ''")
             print("[migrate] users 增加 title 列")
-        if db.execute("SELECT COUNT(*) c FROM units").fetchone()["c"] == 0:
-            for i, t in enumerate(TEAMS):
-                town = ""
-                if t.startswith("鄱阳镇"):
-                    town = "鄱阳镇"
-                elif t.startswith("饶州街道"):
-                    town = "饶州街道"
-                db.execute(
-                    "INSERT INTO units(name, kind, town, sort) VALUES(?,?,?,?)",
-                    (t, "team", town, i))
-            db.execute(
-                "INSERT INTO units(name, kind, town, sort) "
-                "VALUES('办公室','office','',99)")
-            print("[init] 已初始化单位列表（4 中队 + 办公室）")
-        # 主管理员不再挂「大队」，unit 置空走登录页单独入口
-        db.execute("UPDATE users SET unit='' WHERE role='super'")
+        # 组织架构改版（2026-09-06）：去掉中队/办公室，记录只按两个乡镇归类
+        if db.execute(
+                "SELECT COUNT(*) c FROM sqlite_master "
+                "WHERE type='table' AND name='units'").fetchone()["c"]:
+            db.execute("DROP TABLE units")
+            print("[migrate] 已删除 units 表（中队/办公室体系）")
+        _to_town = (
+            "CASE WHEN {c} LIKE '鄱阳镇%%' THEN '鄱阳镇' "
+            "WHEN {c} LIKE '饶州街道%%' THEN '饶州街道' ELSE {c} END"
+        )
+        for _tbl in ("records", "cases"):
+            _names = [r[1] for r in db.execute(
+                "PRAGMA table_info(%s)" % _tbl).fetchall()]
+            if "team" in _names:
+                db.execute("ALTER TABLE %s RENAME COLUMN team TO town" % _tbl)
+                db.execute("UPDATE %s SET town = %s" % (
+                    _tbl, _to_town.format(c="town")))
+                print("[migrate] %s.team → %s.town（按前缀归到两个乡镇）"
+                      % (_tbl, _tbl))
         # 投诉并入巡查（2026-09-02 拍板）：complaints 迁移为 records（分类「投诉纠纷」）
         def _thumb_rel(rel):
             stem, ext = rel.rsplit(".", 1)
@@ -303,11 +259,11 @@ def init_db():
                 if c["handler"]:
                     result += f"（处理人：{c['handler']}）"
             cur = db.execute(
-                "INSERT INTO records(team, community, category, description, "
+                "INSERT INTO records(town, community, category, description, "
                 "status, result, deadline, reporter, created_at, closed_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (c["team"], c["community"] or "", "投诉纠纷", desc, status,
-                 result, "", c["reporter"] or "", c["created_at"],
+                (town_of(c["team"]), c["community"] or "", "投诉纠纷", desc,
+                 status, result, "", c["reporter"] or "", c["created_at"],
                  c["handled_at"] if c["status"] == "done" else None),
             )
             rid = cur.lastrowid
@@ -337,15 +293,21 @@ def init_db():
                     db.execute("DELETE FROM images WHERE id=?", (im["id"],))
             db.execute("DELETE FROM complaints WHERE id=?", (c["id"],))
             print(f"[migrate] 投诉#{c['id']} → 巡查记录#{rid}（投诉纠纷）")
-        cur = db.execute("SELECT COUNT(*) c FROM users")
-        if cur.fetchone()["c"] == 0:
+        # 单账号：库里只保留一个主账号
+        if db.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] == 0:
             db.execute(
                 "INSERT INTO users(name, unit, role, pin, created_at) "
                 "VALUES(?,?,?,?,?)",
-                ("主管理员", "", "super", "0000", now()),
+                ("主账号", "", "super", OWNER_PIN, now()),
             )
-            print("[init] 已创建唯一默认账号：主管理员（单位管理员），初始密码=0000，"
-                  "其余账号由管理员在账号管理页自行添加")
+            print(f"[init] 已创建唯一主账号：主账号，初始密码={OWNER_PIN}"
+                  "（可在「修改密码」页更改）")
+        elif db.execute(
+                "SELECT COUNT(*) c FROM users").fetchone()["c"] > 1:
+            db.execute("DELETE FROM users WHERE id NOT IN "
+                       "(SELECT id FROM users ORDER BY id LIMIT 1)")
+            db.execute("UPDATE users SET unit='', role='super', name='主账号'")
+            print("[migrate] 已收敛为单账号：删除其余账号，保留最早建的那个")
 
 
 def now() -> str:
@@ -355,14 +317,7 @@ def now() -> str:
 init_db()
 
 
-# ---------- 访问控制 ----------
-@app.before_request
-def gate_keeper():
-    if ACCESS_PASSWORD and not session.get("gate_ok"):
-        if request.endpoint not in ("gate", "static"):
-            return redirect(url_for("gate"))
-
-
+# ---------- 访问控制（单账号：登录即可，无角色范围） ----------
 def current_user():
     uid = session.get("uid")
     if not uid:
@@ -374,40 +329,9 @@ def require_user(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not current_user():
-            return redirect(url_for("personnel"))
+            return redirect(url_for("login"))
         return view(*args, **kwargs)
     return wrapped
-
-
-def scope_where(team_col="team", reporter_col="reporter"):
-    """按角色返回数据可见范围 (where子句, 参数列表)。
-
-    主管理员/办公室：全部；中队长/副中队长：本中队全部；队员：仅自己上报的。
-    """
-    u = current_user()
-    if u["role"] in ("super", "office"):
-        return "", []
-    if u["role"] in ("captain", "vice-captain"):
-        return f"{team_col} = ?", [u["unit"]]
-    return f"{reporter_col} = ?", [u["name"]]
-
-
-def can_view_record(r):
-    u = current_user()
-    if u["role"] in ("super", "office"):
-        return True
-    if u["role"] in ("captain", "vice-captain"):
-        return r["team"] == u["unit"]
-    return r["reporter"] == u["name"]
-
-
-def can_view_case(c):
-    u = current_user()
-    if u["role"] in ("super", "office"):
-        return True
-    if u["role"] in ("captain", "vice-captain"):
-        return c["team"] == u["unit"]
-    return c["reporter"] == u["name"]
 
 
 # ---------- 图片 ----------
@@ -458,302 +382,57 @@ def bump_community(name):
     db.commit()
 
 
-# ---------- 站点密码门 ----------
-@app.route("/gate", methods=["GET", "POST"])
-def gate():
-    if request.method == "POST":
-        if request.form.get("password") == ACCESS_PASSWORD:
-            session["gate_ok"] = True
-            return redirect(url_for("index"))
-        return render_template("gate.html", error="密码不对")
-    return render_template("gate.html", error=None)
+# ---------- 登录（单账号 4 位密码） ----------
+# 防爆破：同一 IP 5 分钟内失败 10 次即锁定。4 位 PIN 只有 1 万种组合，
+# 不加这层的话一个脚本几秒就能穷举完。
+LOGIN_WINDOW = 300        # 秒
+LOGIN_MAX_FAILS = 10
+_login_fails = {}         # {client_ip: (首次失败时间戳, 失败次数)}
 
 
-# ---------- 登录 ----------
-@app.route("/personnel", methods=["GET", "POST"])
-def personnel():
+def _bump_fail():
+    ip = request.remote_addr or "?"
+    now = datetime.now().timestamp()
+    t0, n = _login_fails.get(ip, (0.0, 0))
+    if now - t0 > LOGIN_WINDOW:
+        n = 0
+    _login_fails[ip] = (now, n + 1)
+
+
+def _fails_locked():
+    ip = request.remote_addr or "?"
+    t0, n = _login_fails.get(ip, (0.0, 0))
+    if datetime.now().timestamp() - t0 > LOGIN_WINDOW:
+        return False
+    return n >= LOGIN_MAX_FAILS
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
-        unit = (request.form.get("unit") or "").strip()
-        name = (request.form.get("name") or "").strip()
+        if _fails_locked():
+            return render_template(
+                "login.html",
+                error="尝试太频繁，%d 分钟后再试" % (LOGIN_WINDOW // 60)), 429
         pin = (request.form.get("pin") or "").strip()
-        if unit == "__super__":
-            u = get_db().execute(
-                "SELECT * FROM users WHERE role='super' AND name=? AND pin=?",
-                (name, pin),
-            ).fetchone()
-        else:
-            u = get_db().execute(
-                "SELECT * FROM users WHERE unit=? AND name=? AND pin=?",
-                (unit, name, pin),
-            ).fetchone()
-        if u:
+        row = get_db().execute("SELECT * FROM users LIMIT 1").fetchone()
+        if row and row["pin"] == pin:
+            _login_fails.pop(request.remote_addr or "?", None)
             session.permanent = True
-            session["uid"] = u["id"]
+            session["uid"] = row["id"]
+            log_action("登录", "主账号登录")
             return redirect(url_for("index"))
-        # 登录失败走 PRG：重定向到干净地址，避免分享链接带参循环自动提交
-        flash("单位、姓名或密码不对，请重新输入", "error")
-        return redirect(url_for("personnel"))
-    return render_template("personnel.html", error=None, units=login_units())
-
-
-@app.route("/api/users")
-def api_users():
-    unit = request.args.get("unit", "").strip()
-    if unit == "__super__":
-        rows = get_db().execute(
-            "SELECT name FROM users WHERE role='super' ORDER BY id"
-        ).fetchall()
-        return jsonify([r["name"] for r in rows])
-    if unit not in all_unit_names():
-        return jsonify([])
-    rows = get_db().execute(
-        "SELECT name FROM users WHERE unit=? ORDER BY id", (unit,)
-    ).fetchall()
-    return jsonify([r["name"] for r in rows])
+        _bump_fail()
+        # 登录失败走 PRG：重定向到干净地址，避免链接带参循环自动提交
+        flash("密码不对，请重新输入", "error")
+        return redirect(url_for("login"))
+    return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
     session.pop("uid", None)
-    return redirect(url_for("personnel"))
-
-
-# ---------- 账号管理（主管理员/办公室/中队长） ----------
-def admin_access():
-    """账号管理页面与操作权限校验，返回当前用户或 abort。"""
-    u = current_user()
-    if not u:
-        return redirect(url_for("personnel"))
-    if u["role"] not in ("super", "office", "captain"):
-        abort(403)
-    return u
-
-
-@app.route("/admin")
-@require_user
-def admin():
-    u = admin_access()
-    db = get_db()
-    if u["role"] == "captain":
-        users = db.execute(
-            "SELECT * FROM users WHERE unit=? ORDER BY id", (u["unit"],)
-        ).fetchall()
-        add_units = [u["unit"]]
-    elif u["role"] == "office":
-        users = db.execute(
-            "SELECT * FROM users ORDER BY unit, id"
-        ).fetchall()
-        add_units = team_units()
-    else:  # super
-        users = db.execute(
-            "SELECT * FROM users ORDER BY unit, id"
-        ).fetchall()
-        add_units = all_unit_names()
-
-    # 密码可见范围：主管理员看全部；办公室看不到主管理员的；中队长只看本队队员(副中队长/队员)
-    share_base = base_url()
-    items = []
-    for row in users:
-        row = dict(row)
-        if u["role"] == "super":
-            row["show_pin"] = True
-        elif u["role"] == "office":
-            row["show_pin"] = row["role"] != "super"
-        else:  # captain
-            row["show_pin"] = row["role"] in ("vice-captain", "member")
-        row["can_reset"] = u["role"] == "super"  # 重置密码仅主管理员
-        if row["show_pin"]:
-            row["share_url"] = (
-                share_base + url_for("personnel",
-                                     unit=row["unit"], name=row["name"],
-                                     pin=row["pin"])
-            )
-        items.append(row)
-
-    logs = []
-    if u["role"] == "super":
-        logs = get_db().execute(
-            "SELECT * FROM logs ORDER BY id DESC LIMIT 100"
-        ).fetchall()
-
-    return render_template("admin.html", users=items, teams=team_units(),
-                           role_labels=ROLE_LABELS, user=u,
-                           add_units=add_units,
-                           add_roles=ADD_ROLES[u["role"]],
-                           unit_suggestions=all_unit_names(),
-                           unit_list=get_units(),
-                           base_url=get_setting("base_url", ""),
-                           logs=logs)
-
-
-@app.route("/admin/unit/add", methods=["POST"])
-@require_user
-def admin_unit_add():
-    u = admin_access()
-    if u["role"] != "super":
-        flash("只有主管理员可以管理单位", "error")
-        return redirect(url_for("admin"))
-    name = (request.form.get("name") or "").strip()
-    kind = request.form.get("kind", "team").strip()
-    town = (request.form.get("town") or "").strip()
-    if not name:
-        flash("单位名称不能为空", "error")
-        return redirect(url_for("admin"))
-    if kind not in ("team", "office"):
-        kind = "team"
-    if get_db().execute("SELECT 1 FROM units WHERE name=?", (name,)).fetchone():
-        flash("已存在同名单位", "error")
-        return redirect(url_for("admin"))
-    sort = len(get_units()) + 1
-    get_db().execute(
-        "INSERT INTO units(name, kind, town, sort) VALUES(?,?,?,?)",
-        (name, kind, town, sort),
-    )
-    get_db().commit()
-    log_action("新增单位", f"{name}（{'中队' if kind == 'team' else '办公室'}）")
-    flash(f"单位「{name}」已添加", "ok")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/unit/rename", methods=["POST"])
-@require_user
-def admin_unit_rename():
-    u = admin_access()
-    if u["role"] != "super":
-        abort(403)
-    uid = request.form.get("uid", "")
-    new_name = (request.form.get("name") or "").strip()
-    row = get_db().execute(
-        "SELECT * FROM units WHERE id=?", (uid,)
-    ).fetchone() if uid.isdigit() else None
-    if not row or not new_name:
-        flash("参数不对", "error")
-        return redirect(url_for("admin"))
-    if new_name != row["name"] and get_db().execute(
-            "SELECT 1 FROM units WHERE name=?", (new_name,)).fetchone():
-        flash("已存在同名单位", "error")
-        return redirect(url_for("admin"))
-    db = get_db()
-    # 历史记录保留旧名（数据不动），仅更新单位表和该单位下账号的单位名
-    db.execute("UPDATE users SET unit=? WHERE unit=?", (new_name, row["name"]))
-    db.execute("UPDATE units SET name=?, town=? WHERE id=?",
-               (new_name, (request.form.get("town") or row["town"]).strip(),
-                uid))
-    db.commit()
-    log_action("单位改名", f"{row['name']} → {new_name}")
-    flash("单位已更新", "ok")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/unit/delete", methods=["POST"])
-@require_user
-def admin_unit_delete():
-    u = admin_access()
-    if u["role"] != "super":
-        abort(403)
-    uid = request.form.get("uid", "")
-    row = get_db().execute(
-        "SELECT * FROM units WHERE id=?", (uid,)
-    ).fetchone() if uid.isdigit() else None
-    if not row:
-        flash("参数不对", "error")
-        return redirect(url_for("admin"))
-    cnt = get_db().execute(
-        "SELECT COUNT(*) c FROM users WHERE unit=?", (row["name"],)
-    ).fetchone()["c"]
-    if cnt:
-        flash(f"「{row['name']}」下还有 {cnt} 个账号，先删除账号才能删单位", "error")
-        return redirect(url_for("admin"))
-    get_db().execute("DELETE FROM units WHERE id=?", (uid,))
-    get_db().commit()
-    log_action("删除单位", row["name"])
-    flash(f"单位「{row['name']}」已删除", "ok")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/settings", methods=["POST"])
-@require_user
-def admin_settings():
-    u = admin_access()
-    if u["role"] != "super":
-        flash("只有主管理员可以配置域名", "error")
-        return redirect(url_for("admin"))
-    val = (request.form.get("base_url") or "").strip().rstrip("/")
-    if val and not val.startswith(("http://", "https://")):
-        flash("域名要以 http:// 或 https:// 开头，例如 http://192.168.50.65:8755", "error")
-        return redirect(url_for("admin"))
-    set_setting("base_url", val)
-    flash("分享域名已保存，分享链接将使用：" + (val or "当前访问地址"), "ok")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/add", methods=["POST"])
-@require_user
-def admin_add():
-    u = admin_access()
-    name = (request.form.get("name") or "").strip()
-    unit = (request.form.get("unit") or "").strip()
-    role = (request.form.get("role") or "").strip()
-    title = (request.form.get("title") or "").strip()
-    if not name:
-        flash("姓名不能为空", "error")
-        return redirect(url_for("admin"))
-    if not unit:
-        flash("单位不能为空", "error")
-        return redirect(url_for("admin"))
-    if u["role"] == "captain":
-        if unit != u["unit"]:
-            flash("只能给自己中队添加人员", "error")
-            return redirect(url_for("admin"))
-    allowed = ["captain", "vice-captain", "member", "office"] if u["role"] == "super"         else ["vice-captain", "member"]
-    if role not in allowed:
-        flash("角色不合法", "error")
-        return redirect(url_for("admin"))
-    if role == "office" and title not in ("办公室主任", "办公室科员"):
-        title = "办公室主任"
-    if role != "office":
-        title = ""
-    # 手动输入的新单位自动进单位列表（角色是办公室类则标 office，否则按中队）
-    db = get_db()
-    if not db.execute("SELECT 1 FROM units WHERE name=?", (unit,)).fetchone():
-        db.execute(
-            "INSERT INTO units(name, kind, town, sort) VALUES(?,?,?,?)",
-            (unit, "office" if role == "office" else "team", "",
-             len(get_units()) + 1),
-        )
-    if get_db().execute(
-            "SELECT 1 FROM users WHERE unit=? AND name=?", (unit, name)
-    ).fetchone():
-        flash(f"{unit} 已存在同名人员", "error")
-        return redirect(url_for("admin"))
-    pin = random_pin()
-    get_db().execute(
-        "INSERT INTO users(name, unit, role, title, pin, created_at) "
-        "VALUES(?,?,?,?,?,?)",
-        (name, unit, role, title, pin, now()),
-    )
-    get_db().commit()
-    log_action("创建账号", f"{unit} · {name}（{ROLE_LABELS[role]}）")
-    flash(f"已创建 {unit}·{name}（{ROLE_LABELS[role]}），初始密码 {pin}，请转交本人", "ok")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/reset/<int:uid>", methods=["POST"])
-@require_user
-def admin_reset(uid):
-    u = admin_access()
-    if u["role"] != "super":
-        flash("只有主管理员可以重置密码", "error")
-        return redirect(url_for("admin"))
-    target = get_db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
-    if not target:
-        abort(404)
-    pin = random_pin()
-    get_db().execute("UPDATE users SET pin=? WHERE id=?", (pin, uid))
-    get_db().commit()
-    log_action("重置密码", f"{target['name']}（{target['unit']}）")
-    flash(f"已重置 {target['name']} 密码，新密码 {pin}，请转交本人", "ok")
-    return redirect(url_for("admin"))
+    return redirect(url_for("login"))
 
 
 # ---------- 修改自己的密码（所有人） ----------
@@ -780,52 +459,47 @@ def password():
 
 
 # ---------- 巡查记录 ----------
-@app.route("/")
-@require_user
-def index():
-    u = current_user()
-    team = request.args.get("team", "")
-    category = request.args.get("category", "")
-    reporter = request.args.get("reporter", "")
+def _record_where():
+    """按查询串拼 records 的筛选条件，返回 (where 子句, 参数列表)。"""
+    town = (request.args.get("town") or request.args.get("team") or "").strip()
+    where, params = "", []
+    if town in TOWNS:
+        where, params = "town = ?", [town]
+    for cond, val in (
+        ("category", request.args.get("category", "")),
+        ("reporter", request.args.get("reporter", "")),
+        ("community", request.args.get("community", "")),
+    ):
+        val = (val or "").strip()
+        if val:
+            where = (where + " AND " if where else "") + cond + " = ?"
+            params.append(val)
     status = request.args.get("status", "")
-    month = request.args.get("month", "")
-    community = request.args.get("community", "")
-    q = (request.args.get("q") or "").strip()
-
-    where, params = scope_where()
-    if where and team:
-        where += " AND team = ?"
-        params.append(team)
-    elif where:
-        pass  # 中队长/队员的 team 已由 scope 限定
-    else:
-        if team:
-            where = "team = ?"
-            params = [team]
-    if category:
-        where = (where + " AND " if where else "") + "category = ?"
-        params.append(category)
-    if reporter:
-        where = (where + " AND " if where else "") + "reporter = ?"
-        params.append(reporter)
     if status in ("pending", "closed"):
         where = (where + " AND " if where else "") + "status = ?"
         params.append(status)
+    month = (request.args.get("month") or "").strip()
     if month:
         where = (where + " AND " if where else "") + "created_at LIKE ?"
         params.append(month + "%")
-    if community:
-        where = (where + " AND " if where else "") + "community = ?"
-        params.append(community)
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    if start:
+        where = (where + " AND " if where else "") + "created_at >= ?"
+        params.append(start + " 00:00")
+    if end:
+        where = (where + " AND " if where else "") + "created_at <= ?"
+        params.append(end + " 23:59")
+    q = (request.args.get("q") or "").strip()
     if q:
-        where = (where + " AND " if where else "") + "(community LIKE ? OR description LIKE ?)"
+        where = (where + " AND " if where else "") + \
+            "(community LIKE ? OR description LIKE ?)"
         params += [f"%{q}%", f"%{q}%"]
+    return where, params
 
-    sql = "SELECT * FROM records"
-    if where:
-        sql += " WHERE " + where
-    sql += " ORDER BY id DESC"
-    records = [dict(r) for r in get_db().execute(sql, params).fetchall()]
+
+def _decorate(records):
+    """补列表页要用的缩略图和待处理天数。"""
     today = datetime.now().date()
     for r in records:
         img = get_db().execute(
@@ -841,60 +515,50 @@ def index():
                 r["days_pending"] = 0
         else:
             r["days_pending"] = None
+    return records
 
-    # 统计也按权限范围
+
+@app.route("/")
+@require_user
+def index():
+    where, params = _record_where()
+
+    sql = "SELECT * FROM records"
+    if where:
+        sql += " WHERE " + where
+    sql += " ORDER BY id DESC"
+    records = _decorate([dict(r) for r in get_db().execute(sql, params).fetchall()])
+
     this_month = datetime.now().strftime("%Y-%m")
-    stat_where = where
-    stat_params = list(params)
-    def count_where(extra=""):
-        w = stat_where
-        if extra:
-            w = (w + " AND " if w else "") + extra
+
+    def count_where(extra="", extra_params=()):
+        w = where + (" AND " + extra if w and extra else w or extra)
         sql2 = "SELECT COUNT(*) c FROM records"
         if w:
             sql2 += " WHERE " + w
-        return get_db().execute(sql2, stat_params).fetchone()["c"]
+        return get_db().execute(sql2, params + list(extra_params)).fetchone()["c"]
 
     stats = {
-        "month_new": count_where("created_at LIKE ?") if False else
-            get_db().execute(
-                "SELECT COUNT(*) c FROM records WHERE " +
-                ((stat_where + " AND ") if stat_where else "") +
-                "created_at LIKE ?", stat_params + [this_month + "%"],
-            ).fetchone()["c"],
-        "pending": get_db().execute(
-            "SELECT COUNT(*) c FROM records WHERE " +
-            ((stat_where + " AND ") if stat_where else "") + "status='pending'",
-            stat_params,
-        ).fetchone()["c"],
-        "closed": get_db().execute(
-            "SELECT COUNT(*) c FROM records WHERE " +
-            ((stat_where + " AND ") if stat_where else "") + "status='closed'",
-            stat_params,
-        ).fetchone()["c"],
+        "month_new": count_where("created_at LIKE ?", (this_month + "%",)),
+        "pending": count_where("status='pending'"),
+        "closed": count_where("status='closed'"),
     }
 
-    # 筛选下拉选项
-    can_all = u["role"] in ("super", "office")
-    team_options = team_units() if can_all else []
-    if u["role"] in ("captain", "vice-captain"):
-        reporter_rows = get_db().execute(
-            "SELECT name FROM users WHERE unit=? ORDER BY id", (u["unit"],)
-        ).fetchall()
-    elif can_all:
-        reporter_rows = get_db().execute(
-            "SELECT name FROM users ORDER BY unit, id"
-        ).fetchall()
-    else:
-        reporter_rows = []
+    # 小区候选：本库出现过的，按出现次数排
+    community_options = [r["name"] for r in get_db().execute(
+        "SELECT name FROM communities ORDER BY count DESC, name").fetchall()]
 
     return render_template(
-        "index.html", records=records, stats=stats, user=u,
-        categories=CATEGORIES, role_labels=ROLE_LABELS,
-        team_options=team_options, reporter_options=[r["name"] for r in reporter_rows],
-        can_all=can_all,
-        sel={"team": team, "category": category, "reporter": reporter,
-             "status": status, "month": month, "community": community, "q": q},
+        "index.html", records=records, stats=stats, user=current_user(),
+        categories=CATEGORIES,
+        community_options=community_options,
+        sel={"town": request.args.get("town") or request.args.get("team") or "",
+             "category": request.args.get("category", ""),
+             "reporter": request.args.get("reporter", ""),
+             "status": request.args.get("status", ""),
+             "month": request.args.get("month", ""),
+             "community": request.args.get("community", ""),
+             "q": request.args.get("q", "")},
         this_month=this_month,
     )
 
@@ -902,30 +566,25 @@ def index():
 @app.route("/create", methods=["GET", "POST"])
 @require_user
 def create():
-    u = current_user()
     if request.method == "POST":
-        if u["role"] in ("captain", "vice-captain", "member"):
-            team = u["unit"]
-        else:
-            team = (request.form.get("team") or "").strip()
+        town = (request.form.get("town") or "").strip()
         community = (request.form.get("community") or "").strip()
         category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
         deadline = (request.form.get("deadline") or "").strip()
         lead_dept = (request.form.get("lead_dept") or "").strip()
         assist_dept = (request.form.get("assist_dept") or "").strip()
-        if team not in team_units():
-            return render_template("create.html", error="请选择所属中队",
-                                   teams=team_units(), categories=CATEGORIES,
-                                   user=u), 400
-        # 小区、分类、描述都可以留空（分类缺省记“其他”），传了之后可在详情页编辑补全
+        if town not in TOWNS:
+            return render_template("create.html", error="请选择所属乡镇",
+                                   categories=CATEGORIES), 400
+        # 小区、分类、描述都可以留空（分类缺省记"其他"），之后可在详情页编辑补全
         db = get_db()
         cur = db.execute(
-            "INSERT INTO records(team, community, category, description, "
+            "INSERT INTO records(town, community, category, description, "
             "status, deadline, lead_dept, assist_dept, reporter, created_at) "
             "VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (team, community, category, description, "pending", deadline,
-             lead_dept, assist_dept, u["name"], now()),
+            (town, community, category, description, "pending", deadline,
+             lead_dept, assist_dept, current_user()["name"], now()),
         )
         rid = cur.lastrowid
         saved = save_photos(request.files.getlist("photos"),
@@ -937,12 +596,11 @@ def create():
         )
         db.commit()
         log_action("新增巡查记录",
-                   f"{team} · {community or '未填小区'} · {category}")
+                   f"{town} · {community or '未填小区'} · {category}")
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
     return render_template(
-        "create.html", error=None, teams=team_units(), categories=CATEGORIES,
-        user=u, old=None,
+        "create.html", error=None, categories=CATEGORIES,
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
@@ -953,8 +611,6 @@ def detail(rid):
     r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
     if not r:
         abort(404)
-    if not can_view_record(r):
-        abort(403)
     images = get_db().execute(
         "SELECT * FROM images WHERE record_id=? ORDER BY id", (rid,)
     ).fetchall()
@@ -968,28 +624,24 @@ def detail(rid):
 @app.route("/record/<int:rid>/edit", methods=["GET", "POST"])
 @require_user
 def edit_record(rid):
-    u = current_user()
     r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
     if not r:
         abort(404)
-    if not can_view_record(r):
-        abort(403)
     if request.method == "POST":
-        team = (request.form.get("team") or "").strip()
+        town = (request.form.get("town") or "").strip()
         community = (request.form.get("community") or "").strip()
         category = (request.form.get("category") or "").strip() or "其他"
         description = (request.form.get("description") or "").strip()
         deadline = (request.form.get("deadline") or "").strip()
         lead_dept = (request.form.get("lead_dept") or "").strip()
         assist_dept = (request.form.get("assist_dept") or "").strip()
-        if team not in team_units():
-            return render_template("edit.html", r=r, teams=team_units(),
-                                   categories=CATEGORIES, user=u,
-                                   error="请选择所属中队"), 400
+        if town not in TOWNS:
+            return render_template("edit.html", r=r, categories=CATEGORIES,
+                                   error="请选择所属乡镇"), 400
         get_db().execute(
-            "UPDATE records SET team=?, community=?, category=?, description=?, "
+            "UPDATE records SET town=?, community=?, category=?, description=?, "
             "deadline=?, lead_dept=?, assist_dept=? WHERE id=?",
-            (team, community, category, description, deadline, lead_dept,
+            (town, community, category, description, deadline, lead_dept,
              assist_dept, rid),
         )
         # 编辑时补拍/补充的现场照片，并入「整改前」照片
@@ -1006,8 +658,7 @@ def edit_record(rid):
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
     return render_template(
-        "edit.html", r=r, teams=team_units(), categories=CATEGORIES,
-        user=u, error=None,
+        "edit.html", r=r, categories=CATEGORIES,
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
@@ -1018,8 +669,6 @@ def delete_record(rid):
     r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
     if not r:
         abort(404)
-    if not can_view_record(r):
-        abort(403)
     images = get_db().execute(
         "SELECT filepath FROM images WHERE record_id=?", (rid,)
     ).fetchall()
@@ -1039,6 +688,14 @@ def delete_record(rid):
                 t.unlink()
         except OSError:
             pass
+    # 顺手清掉变空的照片目录，否则备份会把空壳/孤文件一直打包进去
+    for d in {UPLOADS_DIR / f"records/{rid}/before", UPLOADS_DIR / f"records/{rid}/after"}:
+        try:
+            d.rmdir()                      # 只有空目录才成功
+            (d.parent).rmdir()             # records/<rid>
+            UPLOADS_DIR.rmdir()            # uploads
+        except OSError:
+            pass
     flash("记录已删除", "ok")
     return redirect(url_for("index"))
 
@@ -1049,8 +706,6 @@ def close(rid):
     r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
     if not r:
         abort(404)
-    if not can_view_record(r):
-        abort(403)
     if r["status"] == "closed":
         return redirect(url_for("detail", rid=rid))
     if request.method == "POST":
@@ -1076,60 +731,51 @@ def close(rid):
     return render_template("close.html", r=r, error=None)
 
 
-# ---------- 案件（并入巡查主流程） ----------
+# ---------- 案件 ----------
 @app.route("/cases", methods=["GET", "POST"])
 @require_user
 def cases():
-    u = current_user()
-    db = get_db()
     if request.method == "POST":
-        if u["role"] in ("captain", "vice-captain", "member"):
-            team = u["unit"]
-        else:
-            team = (request.form.get("team") or "").strip()
+        town = (request.form.get("town") or "").strip()
         case_no = (request.form.get("case_no") or "").strip()
         case_name = (request.form.get("case_name") or "").strip()
         progress = request.form.get("progress", "investigating")
         fine = request.form.get("fine_amount", "0").strip() or "0"
-        if team not in team_units() or not case_name:
+        if town not in TOWNS or not case_name:
             return render_template(
-                "cases.html", error="中队和案件名称要填", rows=[],
-                teams=team_units(), progress_labels=PROGRESS_LABELS, user=u,
+                "cases.html", error="乡镇和案件名称要填", rows=[],
+                progress_labels=PROGRESS_LABELS,
             ), 400
-        db.execute(
-            "INSERT INTO cases(team, case_no, case_name, progress, "
+        get_db().execute(
+            "INSERT INTO cases(town, case_no, case_name, progress, "
             "fine_amount, reporter, created_at, updated_at) "
             "VALUES(?,?,?,?,?,?,?,?)",
-            (team, case_no, case_name, progress, float(fine), u["name"],
-             now(), now()),
+            (town, case_no, case_name, progress, float(fine),
+             current_user()["name"], now(), now()),
         )
-        db.commit()
-        log_action("登记案件", f"{team} · {case_name}")
+        get_db().commit()
+        log_action("登记案件", f"{town} · {case_name}")
         return redirect(url_for("cases"))
 
-    month = request.args.get("month", "")
-    team_q = request.args.get("team", "")
+    town_q = (request.args.get("town") or request.args.get("team") or "").strip()
     progress_q = request.args.get("progress", "")
+    month = request.args.get("month", "")
 
-    where, params = scope_where()
-    if team_q:
-        where = (where + " AND " if where else "") + "team = ?"
-        params.append(team_q)
+    where, params = "", []
+    if town_q in TOWNS:
+        where, params = "town = ?", [town_q]
     if progress_q in PROGRESS_LABELS:
         where = (where + " AND " if where else "") + "progress = ?"
         params.append(progress_q)
     if month:
         where = (where + " AND " if where else "") + "created_at LIKE ?"
         params.append(month + "%")
-    sql = "SELECT * FROM cases"
-    if where:
-        sql += " WHERE " + where
+    sql = "SELECT * FROM cases" + (" WHERE " + where if where else "")
     sql += " ORDER BY id DESC"
-    rows = db.execute(sql, params).fetchall()
+    rows = get_db().execute(sql, params).fetchall()
     return render_template("cases.html", error=None, rows=rows,
-                           teams=team_units(), progress_labels=PROGRESS_LABELS,
-                           user=u, can_all=u["role"] in ("super", "office"),
-                           sel={"team": team_q, "progress": progress_q,
+                           progress_labels=PROGRESS_LABELS,
+                           sel={"town": town_q, "progress": progress_q,
                                 "month": month})
 
 
@@ -1137,8 +783,6 @@ def cases():
 @require_user
 def case_update(cid):
     c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
-    if not c or not can_view_case(c):
-        abort(404)
     progress = request.form.get("progress", "investigating")
     fine = (request.form.get("fine_amount") or "").strip() or "0"
     db = get_db()
@@ -1154,38 +798,34 @@ def case_update(cid):
 @app.route("/case/<int:cid>/edit", methods=["GET", "POST"])
 @require_user
 def case_edit(cid):
-    u = current_user()
     c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
-    if not c or not can_view_case(c):
+    if not c:
         abort(404)
     if request.method == "POST":
-        if u["role"] in ("super", "office"):
-            team = (request.form.get("team") or "").strip()
-        else:
-            team = c["team"]
+        town = (request.form.get("town") or "").strip()
         case_no = (request.form.get("case_no") or "").strip()
         case_name = (request.form.get("case_name") or "").strip()
         fine = (request.form.get("fine_amount") or "").strip() or "0"
-        if team not in team_units() or not case_name:
-            return render_template("case_edit.html", c=c, teams=team_units(),
-                                   user=u, error="中队和案件名称要填"), 400
+        if town not in TOWNS or not case_name:
+            return render_template("case_edit.html", c=c,
+                                   error="乡镇和案件名称要填"), 400
         db = get_db()
         db.execute(
-            "UPDATE cases SET team=?, case_no=?, case_name=?, fine_amount=?, "
+            "UPDATE cases SET town=?, case_no=?, case_name=?, fine_amount=?, "
             "updated_at=? WHERE id=?",
-            (team, case_no, case_name, float(fine), now(), cid),
+            (town, case_no, case_name, float(fine), now(), cid),
         )
         db.commit()
         log_action("编辑案件", f"案件#{cid} {case_name}")
         return redirect(url_for("cases"))
-    return render_template("case_edit.html", c=c, teams=team_units(), user=u, error=None)
+    return render_template("case_edit.html", c=c, error=None)
 
 
 @app.route("/case/<int:cid>/delete", methods=["POST"])
 @require_user
 def case_delete(cid):
     c = get_db().execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
-    if not c or not can_view_case(c):
+    if not c:
         abort(404)
     get_db().execute("DELETE FROM cases WHERE id=?", (cid,))
     get_db().commit()
@@ -1200,63 +840,60 @@ def case_delete(cid):
 def stats():
     month = request.args.get("month") or datetime.now().strftime("%Y-%m")
     prefix = month + "%"
-    where, params = scope_where()
-    rw = (where + " AND ") if where else ""
+    town = (request.args.get("town") or request.args.get("team") or "").strip()
+    where = "town = ?" if town in TOWNS else ""
+    params = [town] if town in TOWNS else []
+    rw = where + " AND " if where else ""
     db = get_db()
+    p = params + [prefix]
 
     total = db.execute(
-        f"SELECT COUNT(*) c FROM records WHERE {rw}created_at LIKE ?",
-        params + [prefix],
+        f"SELECT COUNT(*) c FROM records WHERE {rw}created_at LIKE ?", p,
     ).fetchone()["c"]
     closed = db.execute(
         f"SELECT COUNT(*) c FROM records WHERE {rw}created_at LIKE ? "
-        "AND status='closed'", params + [prefix],
+        "AND status='closed'", p,
     ).fetchone()["c"]
 
-    by_team = db.execute(
-        f"SELECT team, COUNT(*) c, SUM(status='closed') closed FROM records "
-        f"WHERE {rw}created_at LIKE ? GROUP BY team", params + [prefix],
+    by_town = db.execute(
+        f"SELECT town, COUNT(*) c, SUM(status='closed') closed FROM records "
+        f"WHERE {rw}created_at LIKE ? GROUP BY town", p,
     ).fetchall()
     by_category = db.execute(
         f"SELECT category, COUNT(*) c FROM records WHERE {rw}created_at LIKE ? "
-        "GROUP BY category ORDER BY c DESC", params + [prefix],
-    ).fetchall()
-    by_person = db.execute(
-        f"SELECT reporter, COUNT(*) c, SUM(status='closed') closed FROM records "
-        f"WHERE {rw}created_at LIKE ? GROUP BY reporter ORDER BY c DESC",
-        params + [prefix],
+        "GROUP BY category ORDER BY c DESC", p,
     ).fetchall()
     by_community = db.execute(
         f"SELECT community, COUNT(*) c FROM records WHERE {rw}created_at LIKE ? "
-        "GROUP BY community ORDER BY c DESC LIMIT 10", params + [prefix],
+        "GROUP BY community ORDER BY c DESC LIMIT 10", p,
     ).fetchall()
 
     case_total = db.execute(
-        f"SELECT COUNT(*) c FROM cases WHERE {rw}created_at LIKE ?",
-        params + [prefix],
+        f"SELECT COUNT(*) c FROM cases WHERE {rw}created_at LIKE ?", p,
     ).fetchone()["c"]
     case_fine = db.execute(
         f"SELECT COALESCE(SUM(fine_amount),0) s FROM cases WHERE {rw}created_at LIKE ?",
-        params + [prefix],
+        p,
     ).fetchone()["s"]
     case_by_progress = db.execute(
         f"SELECT progress, COUNT(*) c FROM cases WHERE {rw}created_at LIKE ? "
-        "GROUP BY progress", params + [prefix],
+        "GROUP BY progress", p,
     ).fetchall()
-    case_by_team = db.execute(
-        f"SELECT team, COUNT(*) c FROM cases WHERE {rw}created_at LIKE ? "
-        "GROUP BY team", params + [prefix],
+    case_by_town = db.execute(
+        f"SELECT town, COUNT(*) c FROM cases WHERE {rw}created_at LIKE ? "
+        "GROUP BY town", p,
     ).fetchall()
 
     return render_template(
         "stats.html", month=month,
         total=total, closed=closed,
         rate=round(closed / total * 100, 1) if total else 0,
-        by_team=by_team, by_category=by_category,
-        by_person=by_person, by_community=by_community,
+        by_town=by_town, by_category=by_category,
+        by_community=by_community,
         case_total=case_total, case_fine=case_fine,
-        case_by_progress=case_by_progress, case_by_team=case_by_team,
-        progress_labels=PROGRESS_LABELS, user=current_user(),
+        case_by_progress=case_by_progress, case_by_town=case_by_town,
+        progress_labels=PROGRESS_LABELS,
+        sel={"town": town if town in TOWNS else ""},
     )
 
 
@@ -1267,40 +904,10 @@ def export_data():
     from openpyxl import Workbook
     import zipfile as _zip
 
-    team = request.args.get("team", "")
-    category = request.args.get("category", "")
-    reporter = request.args.get("reporter", "")
-    status = request.args.get("status", "")
     month = request.args.get("month", "")
-    community = request.args.get("community", "")
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
-
-    where, params = scope_where()
-    if team:
-        where = (where + " AND " if where else "") + "team = ?"
-        params.append(team)
-    if category:
-        where = (where + " AND " if where else "") + "category = ?"
-        params.append(category)
-    if reporter:
-        where = (where + " AND " if where else "") + "reporter = ?"
-        params.append(reporter)
-    if status in ("pending", "closed"):
-        where = (where + " AND " if where else "") + "status = ?"
-        params.append(status)
-    if month:
-        where = (where + " AND " if where else "") + "created_at LIKE ?"
-        params.append(month + "%")
-    if community:
-        where = (where + " AND " if where else "") + "community = ?"
-        params.append(community)
-    if start:
-        where = (where + " AND " if where else "") + "created_at >= ?"
-        params.append(start + " 00:00")
-    if end:
-        where = (where + " AND " if where else "") + "created_at <= ?"
-        params.append(end + " 23:59")
+    where, params = _record_where()
 
     sql = "SELECT * FROM records"
     if where:
@@ -1313,9 +920,9 @@ def export_data():
     records.sort(key=lambda r: (order.get(r["category"], 99),
                                 r["community"], r["id"]))
 
-    headers = ["序号", "所属中队", "小区", "问题分类", "问题描述", "状态",
-               "上报人", "上报时间", "销号时间", "处理结果", "照片张数"]
-    widths = [6, 20, 18, 14, 44, 8, 10, 17, 17, 30, 8]
+    headers = ["序号", "所属乡镇", "小区", "问题分类", "问题描述", "状态",
+               "上报时间", "销号时间", "处理结果", "照片张数"]
+    widths = [6, 14, 18, 14, 44, 8, 17, 17, 30, 8]
 
     def photo_count(rid):
         return get_db().execute(
@@ -1323,9 +930,9 @@ def export_data():
         ).fetchone()["c"]
 
     def row_of(i, r):
-        return [i, r["team"], r["community"], r["category"], r["description"],
+        return [i, r["town"], r["community"], r["category"], r["description"],
                 "已办结" if r["status"] == "closed" else "待处理",
-                r["reporter"], r["created_at"], r["closed_at"] or "",
+                r["created_at"], r["closed_at"] or "",
                 r["result"] or "", photo_count(r["id"])]
 
     def fill_sheet(ws, rows):
@@ -1378,42 +985,10 @@ def export_data():
 # ---------- 导出筛选参数（通用） ----------
 def _export_filters():
     """解析导出通用筛选参数，返回 (where, params, start, end, month)。"""
-    team = request.args.get("team", "")
-    town = request.args.get("town", "")
-    category = request.args.get("category", "")
-    reporter = request.args.get("reporter", "")
-    status = request.args.get("status", "")
-    month = request.args.get("month", "")
-    community = request.args.get("community", "")
+    where, params = _record_where()
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
-    where, params = scope_where()
-    if town:
-        t_names = [u["name"] for u in get_units("team") if u["town"] == town]
-        if t_names:
-            where = (where + " AND " if where else "") +                 "team IN (%s)" % ",".join("?" * len(t_names))
-            params += t_names
-    for cond, p in [
-        (team, ("team = ?", team)),
-        (category, ("category = ?", category)),
-        (reporter, ("reporter = ?", reporter)),
-        (status if status in ("pending", "closed") else "", ("status = ?", status)),
-    ]:
-        if cond:
-            where = (where + " AND " if where else "") + p[0]
-            params.append(p[1])
-    if month:
-        where = (where + " AND " if where else "") + "created_at LIKE ?"
-        params.append(month + "%")
-    if community:
-        where = (where + " AND " if where else "") + "community = ?"
-        params.append(community)
-    if start:
-        where = (where + " AND " if where else "") + "created_at >= ?"
-        params.append(start + " 00:00")
-    if end:
-        where = (where + " AND " if where else "") + "created_at <= ?"
-        params.append(end + " 23:59")
+    month = request.args.get("month", "")
     return where, params, start, end, month
 
 
@@ -1479,8 +1054,8 @@ def _ledger_groups():
 def export_ledger():
     groups, start, end = _ledger_groups()
     deps = {k: get_setting(k, d) or d for k, _l, d in LEDGER_DEPS}
-    # 权限范围内出现过的小区，供「打印特定小区」下拉
-    where, params = scope_where()
+    # 当前筛选范围内出现过的小区，供「打印特定小区」下拉
+    where, params = _record_where()
     sql = "SELECT DISTINCT community FROM records WHERE community != ''"
     if where:
         sql += " AND " + where
@@ -1488,14 +1063,12 @@ def export_ledger():
     return render_template(
         "ledger.html", groups=groups, deps=deps,
         start=start, end=end,
-        sel={"town": request.args.get("town", ""),
-             "team": request.args.get("team", ""),
+        sel={"town": request.args.get("town") or request.args.get("team") or "",
              "group": request.args.get("group", ""),
              "community": request.args.get("community", ""),
              "category": request.args.get("category", "")},
-        teams=team_units(), towns=town_units(),
         categories=CATEGORIES,
-        community_options=sorted(cnames), user=current_user())
+        community_options=sorted(cnames))
 
 
 @app.route("/export/ledger/settings", methods=["POST"])
@@ -1770,11 +1343,10 @@ def _inject_cellimages(buf, placements):
     return out
 
 def _ledger_scope_label(unit=None):
-    """按已选条件拼名称片段：时间 至 时间 + 乡镇/中队 + 小区。"""
+    """按已选条件拼名称片段：时间 至 时间 + 乡镇 + 小区。"""
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     town = (request.args.get("town") or "").strip()
-    team = (request.args.get("team") or "").strip()
     community = (request.args.get("community") or "").strip()
     parts = []
     if start and end:
@@ -1783,8 +1355,6 @@ def _ledger_scope_label(unit=None):
         parts.append(start or end)
     if unit:
         parts.append(unit)
-    elif team:
-        parts.append(team)
     elif town:
         parts.append(town)
     if community:
@@ -1806,46 +1376,32 @@ def export_ledger_xlsx():
             return f"{start}至{end}"
         return start or end or ""
 
-    if group in ("team", "town"):
-        # 按中队/乡镇分组：每个单位一个文件夹，文件夹内放该单位的台账 Excel
-        units = team_units() if group == "team" else town_units()
-        town = (request.args.get("town") or "").strip()
-        team = (request.args.get("team") or "").strip()
-        if group == "team" and town:
-            units = [t for t in units if t.startswith(town)]
-        if group == "team" and team:
-            units = [t for t in units if t == team]
-        if group == "town" and team:
-            units = [t for t in units if team.startswith(t)]
+    if group in ("town", "team"):   # team 是老链接写法，同样按乡镇
+        # 按乡镇分组：每个乡镇一个文件夹，文件夹内放该乡镇的台账 Excel
+        sel_town = (request.args.get("town") or "").strip()
+        towns = [sel_town] if sel_town in TOWNS else list(TOWNS)
+        category = (request.args.get("category") or "").strip()
         zbuf = io.BytesIO()
         total = 0
         with _zip.ZipFile(zbuf, "w", _zip.ZIP_DEFLATED) as z:
-            for unit in units:
-                where, params = scope_where()
-                cond = "team = ?" if group == "team" else "team LIKE ?"
-                val = unit if group == "team" else unit + "%"
-                where = (where + " AND " if where else "") + cond
-                params.append(val)
+            for t in towns:
+                where, params = "town = ?", [t]
+                for cond, val in (("community", community), ("category", category)):
+                    if val:
+                        where += " AND " + cond + " = ?"
+                        params.append(val)
                 if start:
-                    where = (where + " AND " if where else "") + "created_at >= ?"
+                    where += " AND created_at >= ?"
                     params.append(start + " 00:00")
                 if end:
-                    where = (where + " AND " if where else "") + "created_at <= ?"
+                    where += " AND created_at <= ?"
                     params.append(end + " 23:59")
-                if community:
-                    where = (where + " AND " if where else "") + "community = ?"
-                    params.append(community)
-                category = (request.args.get("category") or "").strip()
-                if category:
-                    where = (where + " AND " if where else "") + "category = ?"
-                    params.append(category)
-                groups = _ledger_groups_from(where, params, unit=unit,
-                                             unit_town=(group == "town"))
+                groups = _ledger_groups_from(where, params, unit=t)
                 if not groups:
                     continue
                 d = date_part()
                 z.writestr(
-                    f"{unit}/{(d + ' ') if d else ''}{unit}小区摸排台账.xlsx",
+                    f"{t}/{(d + ' ') if d else ''}{t}小区摸排台账.xlsx",
                     _ledger_workbook(groups).getvalue())
                 total += len(groups)
         if total == 0:
@@ -1853,9 +1409,8 @@ def export_ledger_xlsx():
             with _zip.ZipFile(zbuf, "w", _zip.ZIP_DEFLATED) as z:
                 z.writestr("无数据.txt", "当前筛选范围内没有巡查记录")
         zbuf.seek(0)
-        label = "按中队" if group == "team" else "按乡镇"
-        fname = f"{_ledger_scope_label()}小区摸排台账_{label}.zip".replace("/", "-")
-        log_action("导出摸排台账", f"{label} · {fname} · {total} 个小区")
+        fname = f"{_ledger_scope_label()}小区摸排台账_按乡镇.zip".replace("/", "-")
+        log_action("导出摸排台账", f"按乡镇 · {fname} · {total} 个小区")
         return send_file(zbuf, as_attachment=True, download_name=fname,
                          mimetype="application/zip")
 
@@ -1874,8 +1429,6 @@ def record_ledger(rid):
     r = get_db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
     if not r:
         abort(404)
-    if not can_view_record(r):
-        abort(403)
     r = dict(r)
     r["_status_text"] = "已整改" if r["status"] == "closed" else "未整改"
     r["_remark"] = ""
@@ -1899,13 +1452,10 @@ def record_ledger(rid):
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ---------- 数据一键备份（主管理员） ----------
-@app.route("/admin/backup")
+# ---------- 数据一键备份 ----------
+@app.route("/backup")
 @require_user
-def admin_backup():
-    u = current_user()
-    if not u or u["role"] != "super":
-        abort(403)
+def backup():
     import zipfile as _zip
     buf = io.BytesIO()
     with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as z:
@@ -1918,6 +1468,7 @@ def admin_backup():
                     z.write(f, "uploads/" + str(f.relative_to(UPLOADS_DIR)))
     buf.seek(0)
     fname = f"chengguan_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
+    log_action("导出备份", fname)
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/zip")
 
@@ -1931,7 +1482,9 @@ def api_communities():
 
 
 @app.route("/uploads/<path:filepath>")
+@require_user
 def uploads(filepath):
+    # 原图是执法证据，不能无鉴权访问
     return send_from_directory(UPLOADS_DIR, filepath)
 
 
@@ -1948,4 +1501,7 @@ def sw():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # 生产走 Dockerfile 里的 gunicorn；这里只是本地调试入口。
+    # 不默认 debug（Werkzeug 调试器可 RCE），需要时显式 FLASK_DEBUG=1。
+    app.run(host="127.0.0.1", port=5000,
+            debug=os.environ.get("FLASK_DEBUG") == "1")
