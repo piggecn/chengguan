@@ -10,11 +10,13 @@
     <textarea name="result" class="input textarea" rows="4"
               placeholder="如：已拆除违建围栏，恢复公共区域" required></textarea>
   </label>
+  <div id="result-phrases" class="tpl-row"></div>
   <label>销号日期（默认今天；隔天才销号就改成实际那天）
     <input type="date" name="closed_at" class="input" value="{{ today }}">
   </label>
   <label>整改期限（可选，整改到位日期）
     <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
+    <button type="button" class="tpl-btn" onclick="syncDeadline()">同销号日期</button>
   </label>
   <label>整改后照片（可多张）
     <input type="file" name="photos" accept="image/*" multiple capture="environment"
@@ -27,4 +29,21 @@
   <button class="btn btn-success" type="submit">确认销号</button>
   <p class="muted small center">弱网提交失败会自动暂存本机，恢复网络后补传</p>
 </form>
+<script>
+const PHRASES = {{ phrases | tojson }};
+const resTa = document.querySelector('textarea[name=result]');
+const box = document.getElementById('result-phrases');
+box.innerHTML = '<span class="tpl-hint">常用（点一下填入，还能再改）：</span>';
+PHRASES.forEach(function(p) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'tpl-btn'; b.textContent = p;
+  b.onclick = function() { resTa.value = p; };
+  box.appendChild(b);
+});
+function syncDeadline() {
+  const c = document.querySelector('input[name=closed_at]');
+  const d = document.querySelector('input[name=deadline]');
+  if (c && c.value) d.value = c.value;
+}
+</script>
 {% endblock %}

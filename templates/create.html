@@ -34,6 +34,7 @@
     <textarea name="description" class="input textarea" rows="4"
               placeholder="简单描述发现的问题">{{ old.description if old else '' }}</textarea>
   </label>
+  <div id="desc-tpl" class="tpl-row"></div>
   <label>发现日期（默认今天；补录时改成实际巡查那天）
     <input type="date" name="found_at" class="input"
            value="{{ old.found_at if old and old.found_at else today }}">
@@ -41,6 +42,7 @@
   <label>整改期限（可选，用于摸排台账「整改时限」列）
     <input type="date" name="deadline" class="input"
            value="{{ old.deadline if old else '' }}">
+    <button type="button" class="tpl-btn" onclick="syncDeadline()">同发现日期</button>
   </label>
   <label>牵头部门（可选，留空用台账默认）
     <input name="lead_dept" class="input" list="dept-list" autocomplete="off"
@@ -68,4 +70,33 @@
   <button class="btn btn-primary" type="submit">提交</button>
   <p class="muted small center">弱网提交失败会自动暂存本机，恢复网络后补传</p>
 </form>
+<script>
+const TPL = {{ tpl | tojson }};
+const descTa = document.querySelector('textarea[name=description]');
+const tplBox = document.getElementById('desc-tpl');
+function renderTpl() {
+  const cat = document.querySelector('input[name=category]:checked');
+  const list = (cat && TPL[cat.value]) || [];
+  if (!list.length) {
+    tplBox.innerHTML = '<span class="tpl-hint">选个分类，这里出常用描述模板，点一下直接填入</span>';
+    return;
+  }
+  tplBox.innerHTML = '<span class="tpl-hint">常用：</span>';
+  list.forEach(function(t) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tpl-btn'; b.textContent = t;
+    b.onclick = function() { descTa.value = t; };
+    tplBox.appendChild(b);
+  });
+}
+renderTpl();
+document.querySelectorAll('input[name=category]').forEach(function(r) {
+  r.addEventListener('change', renderTpl);
+});
+function syncDeadline() {
+  const f = document.querySelector('input[name=found_at]');
+  const d = document.querySelector('input[name=deadline]');
+  if (f && f.value) d.value = f.value;
+}
+</script>
 {% endblock %}

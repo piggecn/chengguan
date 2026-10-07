@@ -31,12 +31,14 @@
   <label>问题描述（可不填）
     <textarea name="description" class="input textarea" rows="4">{{ r.description }}</textarea>
   </label>
+  <div id="desc-tpl" class="tpl-row"></div>
   <label>发现日期（补录时改成实际巡查那天）
     <input type="date" name="found_at" class="input"
            value="{{ r.found_at or r.created_at[:10] }}">
   </label>
   <label>整改期限（可选）
     <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
+    <button type="button" class="tpl-btn" onclick="syncDeadline()">同发现日期</button>
   </label>
   {% if r.status == 'closed' %}
   <label>销号日期（填错了可以在这里改）
@@ -67,4 +69,33 @@
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn btn-primary" type="submit">保存修改</button>
 </form>
+<script>
+const TPL = {{ tpl | tojson }};
+const descTa = document.querySelector('textarea[name=description]');
+const tplBox = document.getElementById('desc-tpl');
+function renderTpl() {
+  const cat = document.querySelector('input[name=category]:checked');
+  const list = (cat && TPL[cat.value]) || [];
+  if (!list.length) {
+    tplBox.innerHTML = '<span class="tpl-hint">换个分类可切对应描述模板</span>';
+    return;
+  }
+  tplBox.innerHTML = '<span class="tpl-hint">常用（点一下替换描述）：</span>';
+  list.forEach(function(t) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tpl-btn'; b.textContent = t;
+    b.onclick = function() { descTa.value = t; };
+    tplBox.appendChild(b);
+  });
+}
+renderTpl();
+document.querySelectorAll('input[name=category]').forEach(function(r) {
+  r.addEventListener('change', renderTpl);
+});
+function syncDeadline() {
+  const f = document.querySelector('input[name=found_at]');
+  const d = document.querySelector('input[name=deadline]');
+  if (f && f.value) d.value = f.value;
+}
+</script>
 {% endblock %}

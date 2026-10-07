@@ -44,6 +44,29 @@ CATEGORIES = [
     "破坏市政设施", "乱倒垃圾", "噪音扰民", "投诉纠纷", "其他",
 ]
 
+# 描述模板：按分类给几条常用写法（从真实台账提炼），录入页点一下填入；
+# 「其他」是日常事务类。模板里的 X / XX 是占位，填的时候替换成实际情况。
+DESCRIPTION_TEMPLATES = {
+    "违法搭建": ["X栋X单元顶楼违规搭建阳光房约X平米", "业主侵占公共区域搭建围栏/楼梯"],
+    "牛皮癣小广告": ["X栋单元门、楼道口张贴新增小广告X处", "X栋楼道新增牛皮癣，已拍照留存"],
+    "乱堆放杂物": ["X栋楼道口堆放旧家具、纸箱等杂物", "装修堆放建筑垃圾未及时清理", "绿化带内堆放杂物"],
+    "电动车乱停放": ["X栋门口电动车乱停放，堵塞消防通道"],
+    "流动摊贩": ["小区门口流动摊贩占道经营", "流动摊贩占道售卖，已现场劝导"],
+    "出店经营": ["XX店出店经营，货物占用人行道"],
+    "毁坏绿化": ["业主圈占绿地种菜，毁坏灌木约X平米", "绿化带种菜，异味扰民"],
+    "占道经营": ["XX周边摊贩占道经营，早高峰通行受阻"],
+    "破坏市政设施": ["X处市政设施损坏（路灯/井盖/健身器材）"],
+    "乱倒垃圾": ["绿化带内倾倒建筑垃圾X处", "生活垃圾未入桶，散落在XX处"],
+    "噪音扰民": ["XX（广场舞/夜市/装修/水泵）噪音扰民"],
+    "投诉纠纷": ["居民反映XX问题（漏水/污水/邻里纠纷），已上门了解", "X栋住户投诉XX，现场调解"],
+    "其他": ["查看一户一档资料整改情况", "物业质价评估现场检查", "协同消防检查", "现场办公"],
+}
+
+# 整改举措常用短语：销号页点一下填入
+RESULT_PHRASES = ["现场清理", "已现场清理", "现场拆除", "现场制止并拆除", "现场调解",
+                  "已现场调解", "现场协调", "现场处置", "现场劝导并搬离", "已完成",
+                  "已查看", "督促物业整改"]
+
 
 def town_of(value):
     """把老的中队名归到乡镇；已经是乡镇名或为空则原样返回。"""
@@ -670,6 +693,7 @@ def create():
         return redirect(url_for("detail", rid=rid))
     return render_template(
         "create.html", error=None, categories=CATEGORIES, today=today_str(),
+        tpl=DESCRIPTION_TEMPLATES, phrases=RESULT_PHRASES,
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
@@ -736,6 +760,7 @@ def edit_record(rid):
         return redirect(url_for("detail", rid=rid))
     return render_template(
         "edit.html", r=r, categories=CATEGORIES,
+        tpl=DESCRIPTION_TEMPLATES, phrases=RESULT_PHRASES,
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
@@ -807,7 +832,8 @@ def close(rid):
         db.commit()
         log_action("整改销号", f"记录#{rid} {r['community'] or '未填小区'} · {r['category']}")
         return redirect(url_for("detail", rid=rid))
-    return render_template("close.html", r=r, error=None, today=today_str())
+    return render_template("close.html", r=r, error=None, today=today_str(),
+                           phrases=RESULT_PHRASES)
 
 
 # ---------- 统计 ----------
