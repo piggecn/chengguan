@@ -10,7 +10,8 @@ import secrets
 import shutil
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+import zipfile as _zip
+from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
 
@@ -210,11 +211,17 @@ def init_db():
         """)
         # 旧库迁移：records 缺列时补上
         cols = [r[1] for r in db.execute("PRAGMA table_info(records)").fetchall()]
-        for col in ("deadline", "lead_dept", "assist_dept"):
+        for col in ("deadline", "lead_dept", "assist_dept", "found_at"):
             if col not in cols:
                 db.execute(
                     "ALTER TABLE records ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % col)
                 print("[migrate] records 增加 %s 列" % col)
+        # 发现日期（实际巡查/发现那天，可手填；补录时能改成真实日期）。
+        # 老数据没有这一列，用录入日期回填，之后再编辑修正。
+        db.execute(
+            "UPDATE records SET found_at = substr(created_at, 1, 10) "
+            "WHERE found_at IS NULL OR found_at = ''")
+        db.commit()
         ccols = [r[1] for r in db.execute("PRAGMA table_info(cases)").fetchall()]
         if "case_no" not in ccols:
             db.execute(
@@ -313,6 +320,11 @@ def init_db():
 
 def now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def today_str() -> str:
+    """今天 YYYY-MM-DD：新建 / 销号表单里日期输入框的默认值。"""
+    return date.today().isoformat()
 
 
 init_db()
@@ -463,6 +475,7 @@ def password():
 # 记录按哪个时间划进时间段：create 录入时间；smart 智能（已结案按结案时间、
 # 未结案按录入时间）；close 结案时间。
 TIME_KEYS = {
+    "found": "found_at",
     "create": "created_at",
     "smart": ("CASE WHEN status = 'closed' AND closed_at IS NOT NULL "
               "AND closed_at <> '' THEN closed_at ELSE created_at END"),
@@ -504,18 +517,21 @@ def _record_where(basis="create"):
     if status in ("pending", "closed"):
         where = (where + " AND " if where else "") + "status = ?"
         params.append(status)
+    # 统一按「年月日」比较：created_at / closed_at 带时分秒，found_at 只有日期，
+    # 直接比整串会把当天（或只填了日期的销号记录）漏掉。
+    dcol = "substr(%s, 1, 10)" % col
     month = (request.args.get("month") or "").strip()
     if month:
-        where = (where + " AND " if where else "") + col + " LIKE ?"
+        where = (where + " AND " if where else "") + dcol + " LIKE ?"
         params.append(month + "%")
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     if start:
-        where = (where + " AND " if where else "") + col + " >= ?"
-        params.append(start + " 00:00")
+        where = (where + " AND " if where else "") + dcol + " >= ?"
+        params.append(start)
     if end:
-        where = (where + " AND " if where else "") + col + " <= ?"
-        params.append(end + " 23:59")
+        where = (where + " AND " if where else "") + dcol + " <= ?"
+        params.append(end)
     q = (request.args.get("q") or "").strip()
     if q:
         where = (where + " AND " if where else "") + \
@@ -535,7 +551,9 @@ def _decorate(records):
         r["thumb"] = thumb_of(img["filepath"]) if img else None
         if r["status"] == "pending":
             try:
-                d = datetime.strptime(r["created_at"][:10], "%Y-%m-%d").date()
+                # 未处理天数按发现日算，补录的记录才不会算少
+                base = (r["found_at"] or r["created_at"][:10])[:10]
+                d = datetime.strptime(base, "%Y-%m-%d").date()
                 r["days_pending"] = (today - d).days
             except ValueError:
                 r["days_pending"] = 0
@@ -553,7 +571,8 @@ def index():
     sql = "SELECT * FROM records"
     if where:
         sql += " WHERE " + where
-    sql += " ORDER BY id DESC"
+    # 按发现时间倒序（补录的记录按真实发现日排），同日再按录入先后
+    sql += " ORDER BY COALESCE(NULLIF(found_at, ''), substr(created_at,1,10)) DESC, id DESC"
     records = _decorate([dict(r) for r in get_db().execute(sql, params).fetchall()])
 
     this_month = datetime.now().strftime("%Y-%m")
@@ -621,17 +640,20 @@ def create():
         deadline = (request.form.get("deadline") or "").strip()
         lead_dept = (request.form.get("lead_dept") or "").strip()
         assist_dept = (request.form.get("assist_dept") or "").strip()
+        # 发现日期：默认今天，补录时可改成实际巡查那天
+        found_at = (request.form.get("found_at") or "").strip() or today_str()
         if town not in TOWNS:
             return render_template("create.html", error="请选择所属乡镇",
-                                   categories=CATEGORIES), 400
+                                   categories=CATEGORIES,
+                                   today=today_str()), 400
         # 小区、分类、描述都可以留空（分类缺省记"其他"），之后可在详情页编辑补全
         db = get_db()
         cur = db.execute(
             "INSERT INTO records(town, community, category, description, "
-            "status, deadline, lead_dept, assist_dept, reporter, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "status, deadline, lead_dept, assist_dept, reporter, created_at, "
+            "found_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (town, community, category, description, "pending", deadline,
-             lead_dept, assist_dept, current_user()["name"], now()),
+             lead_dept, assist_dept, current_user()["name"], now(), found_at),
         )
         rid = cur.lastrowid
         saved = save_photos(request.files.getlist("photos"),
@@ -647,7 +669,7 @@ def create():
         bump_community(community)
         return redirect(url_for("detail", rid=rid))
     return render_template(
-        "create.html", error=None, categories=CATEGORIES,
+        "create.html", error=None, categories=CATEGORIES, today=today_str(),
         lead_default=get_setting("ledger_lead_dept", "县城市管理综合行政执法大队"),
         assist_default=get_setting("ledger_assist_dept", "社区、物业"))
 
@@ -681,15 +703,24 @@ def edit_record(rid):
         deadline = (request.form.get("deadline") or "").strip()
         lead_dept = (request.form.get("lead_dept") or "").strip()
         assist_dept = (request.form.get("assist_dept") or "").strip()
+        # 发现日期可改：补录的记录在这里改成实际巡查那天
+        found_at = (request.form.get("found_at") or "").strip() or \
+            (r["found_at"] or r["created_at"][:10])
         if town not in TOWNS:
             return render_template("edit.html", r=r, categories=CATEGORIES,
                                    error="请选择所属乡镇"), 400
         get_db().execute(
             "UPDATE records SET town=?, community=?, category=?, description=?, "
-            "deadline=?, lead_dept=?, assist_dept=? WHERE id=?",
+            "deadline=?, lead_dept=?, assist_dept=?, found_at=? WHERE id=?",
             (town, community, category, description, deadline, lead_dept,
-             assist_dept, rid),
+             assist_dept, found_at, rid),
         )
+        # 已销号的记录：销号日期填错了可以在这里改回来
+        if r["status"] == "closed":
+            closed_at = (request.form.get("closed_at") or "").strip()
+            if closed_at:
+                get_db().execute(
+                    "UPDATE records SET closed_at=? WHERE id=?", (closed_at, rid))
         # 编辑时补拍/补充的现场照片，并入「整改前」照片
         saved = save_photos(request.files.getlist("photos"),
                             f"records/{rid}/before")
@@ -767,25 +798,29 @@ def close(rid):
             "VALUES(?,?,?,?)",
             [(rid, "after", p[0], now()) for p in saved],
         )
+        # 销号日期可填：默认今天，补录/隔天销号能改成真实日期
+        closed_at = (request.form.get("closed_at") or "").strip() or now()
         db.execute(
             "UPDATE records SET status='closed', result=?, closed_at=?, "
-            "deadline=? WHERE id=?", (result, now(), deadline, rid),
+            "deadline=? WHERE id=?", (result, closed_at, deadline, rid),
         )
         db.commit()
         log_action("整改销号", f"记录#{rid} {r['community'] or '未填小区'} · {r['category']}")
         return redirect(url_for("detail", rid=rid))
-    return render_template("close.html", r=r, error=None)
+    return render_template("close.html", r=r, error=None, today=today_str())
 
 
 # ---------- 统计 ----------
 # 时间口径：create 按录入时间；smart 智能（已结案按结案时间、未结案按录入时间）；
 # close 按结案时间。默认 smart —— 一条记录算在它该算的时段里。
 BASIS_LABELS = {
+    "found": "按发现时间",
     "create": "按录入时间",
     "smart": "智能口径",
     "close": "按结案时间",
 }
 BASIS_HINTS = {
+    "found": "按实际发现那天统计，补录的记录算在真实发现日。",
     "create": "按记录建立时间统计，跨期才办结的也算在本期。",
     "smart": "已结案按结案时间、未结案按录入时间。",
     "close": "只看这段时间内结案的记录，未结案不计入。",
@@ -809,12 +844,13 @@ def stats():
     if town in TOWNS:
         cond.append("town = ?")
         params.append(town)
+    dcol = "substr(%s, 1, 10)" % col   # 同 _record_where：统一按年月日比较
     if start:
-        cond.append(col + " >= ?")
-        params.append(start + " 00:00")
+        cond.append(dcol + " >= ?")
+        params.append(start)
     if end:
-        cond.append(col + " <= ?")
-        params.append(end + " 23:59")
+        cond.append(dcol + " <= ?")
+        params.append(end)
     scope = " AND ".join(cond)
     db = get_db()
 
@@ -872,13 +908,20 @@ def stats():
 
 
 # ---------- 导出筛选参数（通用） ----------
+def _export_basis():
+    """台账按哪个时间筛：found 发现时间 / create 录入时间，默认 create。"""
+    b = (request.args.get("basis") or "").strip()
+    return b if b in ("found", "create") else "create"
+
+
 def _export_filters():
     """台账导出的筛选参数，返回 (where, params, start, end, month)。
 
-    口径钉死在录入时间：URL 里手填 basis 不能让下载和页面上的预览不一致。
+    口径只认 found / create 两个，非法值回落 create；下载链接必须带上同一个
+    basis（见 ledger.html），否则预览和下载的范围会不一致。
     start/end 已含在 where 里，单独返回是为了给模板回填日期框、拼下载链接。
     """
-    where, params = _record_where("create")
+    where, params = _record_where(_export_basis())
     start = (request.args.get("start") or "").strip()
     end = (request.args.get("end") or "").strip()
     month = request.args.get("month", "")
@@ -904,8 +947,14 @@ def _ledger_groups_from(where, params):
     by_comm = {}
     for r in records:
         by_comm.setdefault(r["community"] or "未填小区", []).append(r)
+    # 小区排序：先按乡镇（饶州街道在上、鄱阳镇在下），同乡镇内再按小区名
+    def _group_key(item):
+        comm, recs = item
+        t = (recs[0]["town"] or "").strip() if recs[0].get("town") else ""
+        return (TOWNS.index(t) if t in TOWNS else len(TOWNS), comm)
+
     groups = []
-    for comm in sorted(by_comm):
+    for comm, _recs in sorted(by_comm.items(), key=_group_key):
         recs = sorted(by_comm.get(comm, []),
                       key=lambda r: (order.get(r["category"], 99), r["id"]))
         rows = []
@@ -930,6 +979,7 @@ def _ledger_groups_from(where, params):
                                "after_thumbs": [thumb_of(p) for p in a]})
         groups.append({
             "community": comm, "rows": rows,
+            "town": (recs[0]["town"] or "").strip() if recs and recs[0].get("town") else "",
             "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
             "blocks": blocks,
         })
@@ -948,14 +998,14 @@ def export_ledger():
     groups, start, end = _ledger_groups()
     deps = {k: get_setting(k, d) or d for k, _l, d in LEDGER_DEPS}
     # 当前筛选范围内出现过的小区，供「打印特定小区」下拉
-    where, params = _record_where("create")
+    where, params = _record_where(_export_basis())
     sql = "SELECT DISTINCT community FROM records WHERE community != ''"
     if where:
         sql += " AND " + where
     cnames = {r["community"] for r in get_db().execute(sql, params).fetchall()}
     return render_template(
         "ledger.html", groups=groups, deps=deps,
-        start=start, end=end,
+        start=start, end=end, basis=_export_basis(),
         sel={"town": request.args.get("town") or request.args.get("team") or "",
              "community": request.args.get("community", ""),
              "category": request.args.get("category", "")},
@@ -978,7 +1028,8 @@ def ledger_settings():
         start=request.args.get("start", ""), end=request.args.get("end", ""),
         town=request.args.get("town", ""), team=request.args.get("team", ""),
         community=request.args.get("community", ""),
-        category=request.args.get("category", "")))
+        category=request.args.get("category", ""),
+        basis=request.args.get("basis", "")))
 
 
 def _ledger_workbook(groups):
@@ -1019,6 +1070,11 @@ def _ledger_workbook(groups):
     wb = Workbook()
     ws = wb.active
     ws.title = "小区摸排台账"
+    # 打开即分页预览：每页中央自动显示「第1页 / 第2页…」水印，与原表一致
+    ws.sheet_view.view = "pageBreakPreview"
+    ws.sheet_view.tabSelected = True
+    ws.sheet_view.zoomScale = 115
+    ws.sheet_view.zoomScaleNormal = 85
     # 纸张：A4 横向 + 原表页边距
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
@@ -1026,8 +1082,10 @@ def _ledger_workbook(groups):
     ws.page_margins.top = ws.page_margins.bottom = 0.751388888888889
     ws.page_margins.header = ws.page_margins.footer = 0.298611111111111
     # 页脚与原表一致：居中「第 &P 页」
+    # ⚠ 不要再设 oddFooter.center.size：openpyxl 会把字号序列化成页脚控制码「&9」，
+    #   写成「&C&9 第 &P 页」，而原表是「&C第 &P 页」，两者不一致。
+    #   注：打印时看到的「第1页/第2页」大字来自上面的 pageBreakPreview 水印，不是页脚。
     ws.oddFooter.center.text = "第 &P 页"
-    ws.oddFooter.center.size = 9
     for col, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.column_dimensions["J"].width = 9.64  # 原表右侧余量列
@@ -1249,6 +1307,181 @@ def _ledger_scope_label():
     if community:
         parts.append(community)
     return " ".join(parts) if parts else "全部"
+
+
+def _esc(s):
+    """docx/xlsx 里写文本前的 XML 转义。"""
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _catalog_p(text, size=24, bold=False, align="both", font=None,
+               first_line=0, page_break=False):
+    """目录里的一个段落。size 是半磅（24 = 12pt = 小四）。
+
+    排版照抄原目录：正文宋体 12pt、1.5 倍行距、两端对齐、首行缩进 2 字符。
+    引导线是字面文本（原目录就是手敲的「- - - - - - -」），不用制表位。
+    """
+    font = font or ("黑体" if bold else "宋体")
+    ppr = '<w:spacing w:line="360" w:lineRule="auto"/>'
+    if page_break:
+        ppr += '<w:pageBreakBefore/>'
+    if first_line:
+        ppr += '<w:ind w:firstLine="%d" w:firstLineChars="100"/>' % first_line
+    if align:
+        ppr += '<w:jc w:val="%s"/>' % align
+    rpr = ('<w:rPr><w:rFonts w:hint="eastAsia" w:ascii="%s" w:hAnsi="%s" '
+           'w:eastAsia="%s" w:cs="%s"/>%s<w:sz w:val="%d"/>'
+           '<w:szCs w:val="%d"/></w:rPr>'
+           % (font, font, font, font, "<w:b/>" if bold else "", size, size))
+    return ('<w:p><w:pPr>%s%s</w:pPr><w:r>%s<w:t xml:space="preserve">%s</w:t>'
+            '</w:r></w:p>' % (ppr, rpr, rpr, _esc(text)))
+
+
+def _fit_name(name, target=8):
+    """把小区名用字间空格撑到 target 个半角单位宽（汉字算 2）。
+
+    原目录就是这么对齐的：3 字名写成「中 央 城」凑成 4 字宽，
+    这样所有行的引导线起点和页码右端才齐。超过 target 的原样返回。
+    """
+    name = name or ""
+    w = sum(2 if ord(c) > 127 else 1 for c in name)
+    if w >= target or not name:
+        return name, max(w, 1)
+    need = target - w
+    chars = list(name)
+    if len(chars) == 1:
+        return chars[0] + " " * need, target
+    gaps = len(chars) - 1
+    out = chars[0]
+    for i in range(gaps):
+        out += " " * (need // gaps + (1 if i < need % gaps else 0)) + chars[i + 1]
+    return out, target
+
+
+def _catalog_sect(cols, space, sep=False, continuous=True):
+    """目录的分节属性：A4 横向 + cols 栏（sep=True 时栏间加竖分隔线）。
+
+    continuous=False 用下一页分节（默认），标题页靠它把正文顶到新的一页。
+    """
+    type_xml = '<w:type w:val="continuous"/>' if continuous else ''
+    sep_xml = ' w:sep="1"' if sep else ''
+    return (
+        '<w:sectPr>' + type_xml
+        + '<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>'
+        + '<w:pgMar w:top="1800" w:right="1440" w:bottom="1800" w:left="1440" '
+          'w:header="851" w:footer="992" w:gutter="0"/>'
+        + '<w:cols w:space="%d" w:num="%d"%s/>' % (space, cols, sep_xml)
+        + '<w:docGrid w:type="lines" w:linePitch="312" w:charSpace="0"/>'
+        + '</w:sectPr>')
+
+
+def _catalog_docx(groups):
+    """生成「小区摸排表目录」docx（零依赖：手写最小 OOXML 包）。
+
+    页码按台账排版推算：每个小区 = 1 页表格 + 照片行数页（一行照片一页）。
+    """
+    # 每个小区占多少页
+    plans = []
+    for g in groups:
+        photo_rows = sum(
+            max(len(b.get("before") or []), len(b.get("after") or []))
+            for b in g.get("blocks") or [])
+        plans.append((g, photo_rows))
+
+    # 每行固定总宽 33 个半角单位（1 汉字 = 2）：3 栏每栏 4369 twips ≈ 7.7cm，
+    # 33 单位刚好一行放得下、不折行。中间空档用「- 」填，页码右端因此全对齐。
+    ROW_W, NAME_W = 33, 8
+
+    def width(s):
+        return sum(2 if ord(c) > 127 else 1 for c in s)
+
+    def page_field(s):
+        return "%-6s页" % s
+
+    def row(prefix, name, page_s):
+        """拼一行：prefix + 小区名 + 「- 」引导线 + 页码，总宽恒为 ROW_W。"""
+        tail = page_field(page_s)
+        fixed = width(prefix) + width(name) + width(tail)
+        n = max(1, (ROW_W - fixed) // 2)
+        return prefix + name + "- " * n + " " * max(0, ROW_W - fixed - 2 * n) + tail
+
+    # 标题单独一节、单栏居中；正文一节分 3 栏带分隔线（横向 A4 才放得下）
+    body = [_catalog_p("中心城区小区摸排表目录", size=36, bold=True,
+                       align="center")]
+    # 标题这一节用「下一页」分节，正文（各乡镇）从新的一页开始
+    body[0] = body[0].replace("</w:pPr>",
+                              _catalog_sect(1, 425, continuous=False) + "</w:pPr>")
+    page, seq, last_town = 1, 0, None
+    for g, photo_rows in plans:
+        town = (g.get("town") or "").strip()
+        if town != last_town:
+            # 一个乡镇占一页：除第一个乡镇外，乡镇标题前插分页符
+            body.append(_catalog_p(town or "未标乡镇", size=32, bold=True,
+                                   align=None, page_break=last_town is not None))
+            last_town = town
+        seq += 1
+        name, _w = _fit_name(g["community"], NAME_W)
+        body.append(_catalog_p(row("%02d " % seq, name, "%02d" % page),
+                               first_line=240))
+        page += 1
+        if photo_rows:
+            # 佐证照片 = 这个小区的照片页：一行照片一页
+            rng = ("%02d" % page) if photo_rows == 1 else \
+                  ("%02d-%02d" % (page, page + photo_rows - 1))
+            body.append(_catalog_p(row("      ", "佐证照片", rng)))
+            page += photo_rows
+
+    doc = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/'
+        'wordprocessingml/2006/main"><w:body>'
+        + "".join(body)
+        # 正文这一节：3 栏 + 栏间竖线，纸张 A4 横向、上下边距 1800 twips
+        + _catalog_sect(3, 427, sep=True)
+        + "</w:body></w:document>")
+    ct = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/'
+        'content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.'
+        'openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.'
+        'openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        "</Types>")
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+        'relationships"><Relationship Id="rId1" Type="http://schemas.'
+        'openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/></Relationships>')
+    drels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+        'relationships"/>')
+    buf = io.BytesIO()
+    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", ct)
+        z.writestr("_rels/.rels", rels)
+        z.writestr("word/document.xml", doc)
+        z.writestr("word/_rels/document.xml.rels", drels)
+    buf.seek(0)
+    return buf
+
+
+@app.route("/export/catalog.docx")
+@require_user
+def export_catalog_docx():
+    """导出当前筛选范围的「小区摸排表目录」Word（页码与台账排版一致）。"""
+    groups, _, _ = _ledger_groups()
+    buf = _catalog_docx(groups)
+    fname = f"{_ledger_scope_label()}小区摸排表目录.docx".replace("/", "-")
+    log_action("导出摸排目录", f"{fname} · {len(groups)} 个小区")
+    return send_file(
+        buf, as_attachment=True, download_name=fname,
+        mimetype="application/vnd.openxmlformats-officedocument."
+                 "wordprocessingml.document")
 
 
 @app.route("/export/ledger.xlsx")

@@ -34,6 +34,10 @@
     <textarea name="description" class="input textarea" rows="4"
               placeholder="简单描述发现的问题">{{ old.description if old else '' }}</textarea>
   </label>
+  <label>发现日期（默认今天；补录时改成实际巡查那天）
+    <input type="date" name="found_at" class="input"
+           value="{{ old.found_at if old and old.found_at else today }}">
+  </label>
   <label>整改期限（可选，用于摸排台账「整改时限」列）
     <input type="date" name="deadline" class="input"
            value="{{ old.deadline if old else '' }}">

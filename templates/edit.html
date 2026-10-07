@@ -31,9 +31,19 @@
   <label>问题描述（可不填）
     <textarea name="description" class="input textarea" rows="4">{{ r.description }}</textarea>
   </label>
+  <label>发现日期（补录时改成实际巡查那天）
+    <input type="date" name="found_at" class="input"
+           value="{{ r.found_at or r.created_at[:10] }}">
+  </label>
   <label>整改期限（可选）
     <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
   </label>
+  {% if r.status == 'closed' %}
+  <label>销号日期（填错了可以在这里改）
+    <input type="date" name="closed_at" class="input"
+           value="{{ r.closed_at[:10] if r.closed_at else '' }}">
+  </label>
+  {% endif %}
   <label>牵头部门（可选，留空用台账默认）
     <input name="lead_dept" class="input" list="dept-list" autocomplete="off"
            value="{{ r.lead_dept }}" placeholder="{{ lead_default }}">

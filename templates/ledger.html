@@ -57,10 +57,17 @@
         <option value="{{ cname }}" {{ 'selected' if sel.community == cname }}>{{ cname }}</option>
         {% endfor %}
       </select>
+      <select name="basis" class="input" onchange="this.form.submit()" aria-label="时间口径">
+        <option value="create" {{ 'selected' if basis == 'create' }}>按录入时间</option>
+        <option value="found" {{ 'selected' if basis == 'found' }}>按发现时间</option>
+      </select>
     </div>
   </form>
-  <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, community=sel.community, category=sel.category) }}">下载台账（同上预览）</a>
-  <p class="muted small">改任意一项，预览和下载都会立刻按新条件刷新，不用点按钮。台账按<b>录入时间</b>统计；Excel 里嵌的是原图，单条记录可在列表页点「打印」单独导出。</p>
+  <div class="row gap">
+    <a class="btn btn-success" href="{{ url_for('export_ledger_xlsx', start=start, end=end, town=sel.town, community=sel.community, category=sel.category, basis=basis) }}">下载台账（同上预览）</a>
+    <a class="btn btn-mini btn-ghost" href="{{ url_for('export_catalog_docx', start=start, end=end, town=sel.town, community=sel.community, category=sel.category, basis=basis) }}">下载目录（Word）</a>
+  </div>
+  <p class="muted small">改任意一项，预览和下载都会立刻按新条件刷新，不用点按钮。补录的记录用<b>按发现时间</b>才筛得进来（它记的是真实巡查日，不是补录当天）。Excel 里嵌的是原图，单条记录可在列表页点「打印」单独导出。目录页码按「每小区 1 页表格 + 每张照片 1 页」推算，与实际打印排版一致。</p>
 </div>
 
 </div>

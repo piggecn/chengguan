@@ -94,7 +94,7 @@
             {{ '已办结' if r.status == 'closed' else '待处理' }}</span>
         </span>
       </div>
-      <p class="muted small">{{ r.town }} · {{ r.created_at }}</p>
+      <p class="muted small">{{ r.town }} · 发现 {{ r.found_at or r.created_at[:10] }}</p>
       <p class="muted desc-wrap">{{ r.description }}</p>
     </div>
   </a>
@@ -132,7 +132,7 @@
         <td>{{ r.town }}</td>
         <td>{{ r.category }}</td>
         <td class="col-desc"><span class="desc-wrap">{{ r.description }}</span></td>
-        <td class="muted small">{{ r.created_at }}</td>
+        <td class="muted small">{{ r.found_at or r.created_at[:10] }}</td>
         <td>
           <span class="row gap">
             {% if r.status == 'pending' and r.days_pending is not none and r.days_pending > 3 %}

@@ -10,6 +10,9 @@
     <textarea name="result" class="input textarea" rows="4"
               placeholder="如：已拆除违建围栏，恢复公共区域" required></textarea>
   </label>
+  <label>销号日期（默认今天；隔天才销号就改成实际那天）
+    <input type="date" name="closed_at" class="input" value="{{ today }}">
+  </label>
   <label>整改期限（可选，整改到位日期）
     <input type="date" name="deadline" class="input" value="{{ r.deadline }}">
   </label>
