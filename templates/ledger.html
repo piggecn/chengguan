@@ -76,6 +76,7 @@
 
 {% for g in groups %}
 <section class="section">
+  {% for pg in g.pages %}
   <div class="ledger-title">{{ g.community }}小区摸排情况</div>
   <div class="table-wrap">
     <table class="table ledger-table">
@@ -83,7 +84,7 @@
         <tr><th>序号</th><th>问题上报部门</th><th>牵头部门</th><th>配合部门</th><th>问题描述</th><th>整改举措</th><th>整改时限</th><th>整改情况</th><th>备注</th></tr>
       </thead>
       <tbody>
-        {% for num, r in g.rows %}
+        {% for num, r in pg.rows %}
         <tr>
           <td class="center">{{ num }}</td>
           <td>{{ deps.ledger_report_dept }}</td>
@@ -96,7 +97,7 @@
           <td>{{ r._remark or '' }}</td>
         </tr>
         {% endfor %}
-        {% for i in range(g.pad) %}
+        {% for i in range(pg.pad) %}
         <tr>
           <td class="center"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
         </tr>
@@ -104,6 +105,7 @@
       </tbody>
     </table>
   </div>
+  {% endfor %}
   {% for blk in g.blocks %}
   <p class="ledger-tableno">{{ g.community }}表格序号{{ blk.num }}</p>
   <div class="row gap photo-labels">

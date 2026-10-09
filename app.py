@@ -961,6 +961,25 @@ LEDGER_DEPS = [
     ("ledger_assist_dept", "配合部门", "社区、物业"),
 ]
 
+# 一页表格放多少行数据：照原表（标题 35.25pt + 表头 35pt + 9×45pt = 475.25pt，
+# A4 横向去掉上下页边距可用约 487pt）。行数超了就再起一页表格，标题和表头重复。
+LEDGER_ROWS_PER_PAGE = 9
+
+
+def _ledger_pages(rows, per_page=LEDGER_ROWS_PER_PAGE):
+    """把一个小区的行按每页固定行数切开：每页 = 标题 + 表头 + per_page 行（不足补带边框空行）。
+
+    必须按页切开、每页都固定行数，否则一个小区行数超过一页时，
+    Excel 自动分页会把表格和它下面的照片页推错位，后面所有页码跟着全乱。
+    """
+    if not rows:
+        return [{"rows": [], "pad": per_page}]
+    out = []
+    for i in range(0, len(rows), per_page):
+        chunk = rows[i:i + per_page]
+        out.append({"rows": chunk, "pad": per_page - len(chunk)})
+    return out
+
 
 def _ledger_groups_from(where, params):
     """按给定 SQL 条件取巡查记录并按小区分组；居民投诉并入同小区表（类目「居民投诉」共用序号）。"""
@@ -1024,8 +1043,8 @@ def _ledger_groups_from(where, params):
                                "after_thumbs": [thumb_of(p) for p in a]})
         groups.append({
             "community": comm, "rows": rows,
+            "pages": _ledger_pages(rows),   # 每页固定 9 行：表格页与照片页才对得上
             "town": town,
-            "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
             "blocks": blocks,
         })
     return groups
@@ -1078,10 +1097,11 @@ def ledger_settings():
 
 
 def _ledger_workbook(groups):
-    """生成摸排台账工作簿：单表连续排版，页脚与原表一致；照片用 WPS 嵌入单元格（DISPIMG）。"""
+    """生成摸排台账工作簿：每页固定行数、页脚与原表一致；照片用 WPS 嵌入单元格（DISPIMG）。"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.pagebreak import Break
     from PIL import Image as PILImage
 
     deps = [get_setting(k, d) or d for k, _l, d in LEDGER_DEPS]
@@ -1137,53 +1157,55 @@ def _ledger_workbook(groups):
     if not groups:  # 无数据时也要有可见内容
         ws["A1"] = "当前范围内没有巡查记录"
         ws["A1"].font = title_font
-    # 单表连续排版：下一个小区的表格接在上一个小区照片下面，不强制分页
+    # 逐小区排版：每个小区按「每页固定 9 行」切页，每页表格/每行照片后打手动分页符
+    # （和原表一致）。行数超过一页就再起一页表格，标题表头重复，绝不把表格和照片挤乱。
     placements = []  # 嵌入单元格图片 {ref, disp, x, y, cx, cy, png}
     y_pt = 0.0       # 当前行顶距表顶的点数（算图片 y 偏移）
     r = 1
     for g in groups:
-        # 标题行（黑体28 居中）
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
-        c = ws.cell(row=r, column=1, value=f"{g['community']}小区摸排情况")
-        c.font = title_font
-        c.alignment = title_align
-        ws.row_dimensions[r].height = 35.25
-        r += 1
-        y_pt += 35.25
-        # 表头（序号/备注黑体16，其余黑体12）
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=r, column=col, value=h)
-            cell.font = head_big if col in (1, 9) else head_small
-            cell.border = border
-            cell.alignment = center
-        ws.row_dimensions[r].height = 35
-        r += 1
-        y_pt += 35
-        # 数据行：固定 9 行序号空间，不足补空行；超过 9 行顺延
-        data_start = r
-        for num, rec in g["rows"]:
-            vals = [num, deps[0],
-                    rec.get("lead_dept") or deps[1],
-                    rec.get("assist_dept") or deps[2],
-                    rec["description"] or rec["category"],
-                    rec["result"] or "",
-                    rec["deadline"] or "",
-                    rec["_status_text"],
-                    rec["_remark"] or ""]
-            for col, v in enumerate(vals, 1):
-                cell = ws.cell(row=r, column=col, value=v)
+        for pg in g["pages"]:
+            # 标题行（黑体28 居中）
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+            c = ws.cell(row=r, column=1, value=f"{g['community']}小区摸排情况")
+            c.font = title_font
+            c.alignment = title_align
+            ws.row_dimensions[r].height = 35.25
+            r += 1
+            y_pt += 35.25
+            # 表头（序号/备注黑体16，其余黑体12）
+            for col, h in enumerate(headers, 1):
+                cell = ws.cell(row=r, column=col, value=h)
+                cell.font = head_big if col in (1, 9) else head_small
                 cell.border = border
-                cell.font = Font(name="宋体", size=10 if col == 5 else 11)
                 cell.alignment = center
-            ws.row_dimensions[r].height = 45
+            ws.row_dimensions[r].height = 35
             r += 1
-            y_pt += 45
-        while r < data_start + 9:  # 补足固定 9 行空间（带边框空行）
-            for col in range(1, 10):
-                ws.cell(row=r, column=col).border = border
-            ws.row_dimensions[r].height = 45
-            r += 1
-            y_pt += 45
+            y_pt += 35
+            # 数据行 + 补足本页固定行数（带边框空行）
+            for num, rec in pg["rows"]:
+                vals = [num, deps[0],
+                        rec.get("lead_dept") or deps[1],
+                        rec.get("assist_dept") or deps[2],
+                        rec["description"] or rec["category"],
+                        rec["result"] or "",
+                        rec["deadline"] or "",
+                        rec["_status_text"],
+                        rec["_remark"] or ""]
+                for col, v in enumerate(vals, 1):
+                    cell = ws.cell(row=r, column=col, value=v)
+                    cell.border = border
+                    cell.font = Font(name="宋体", size=10 if col == 5 else 11)
+                    cell.alignment = center
+                ws.row_dimensions[r].height = 45
+                r += 1
+                y_pt += 45
+            for _ in range(pg["pad"]):
+                for col in range(1, 10):
+                    ws.cell(row=r, column=col).border = border
+                ws.row_dimensions[r].height = 45
+                r += 1
+                y_pt += 45
+            ws.row_breaks.append(Break(id=r - 1))   # 这一页表格到此为止
         # 每组照片一块：表格序号（共用分类序号）+ 整改前/整改后标签 + 照片
         for blk in g["blocks"]:
             tno = ws.cell(row=r, column=1,
@@ -1235,6 +1257,7 @@ def _ledger_workbook(groups):
                 ws.row_dimensions[r].height = 368.5
                 r += 1
                 y_pt += 368.5
+                ws.row_breaks.append(Break(id=r - 1))   # 一行照片一页
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -1426,13 +1449,14 @@ def _catalog_docx(groups):
 
     页码按台账排版推算：每个小区 = 1 页表格 + 照片行数页（一行照片一页）。
     """
-    # 每个小区占多少页
+    # 每个小区占多少页（表格页数 + 照片页数）
     plans = []
     for g in groups:
         photo_rows = sum(
             max(len(b.get("before") or []), len(b.get("after") or []))
             for b in g.get("blocks") or [])
-        plans.append((g, photo_rows))
+        table_pages = max(1, len(g.get("pages") or []))
+        plans.append((g, photo_rows, table_pages))
 
     # 每行固定总宽 33 个半角单位（1 汉字 = 2）：3 栏每栏 4369 twips ≈ 7.7cm，
     # 33 单位刚好一行放得下、不折行。中间空档用「- 」填，页码右端因此全对齐。
@@ -1458,7 +1482,7 @@ def _catalog_docx(groups):
     body[0] = body[0].replace("</w:pPr>",
                               _catalog_sect(1, 425, continuous=False) + "</w:pPr>")
     page, seq, last_town = 1, 0, None
-    for g, photo_rows in plans:
+    for g, photo_rows, table_pages in plans:
         town = (g.get("town") or "").strip()
         if town != last_town:
             # 一个乡镇占一页：除第一个乡镇外，乡镇标题前插分页符
@@ -1467,9 +1491,12 @@ def _catalog_docx(groups):
             last_town = town
         seq += 1
         name, _w = _fit_name(g["community"], NAME_W)
-        body.append(_catalog_p(row("%02d " % seq, name, "%02d" % page),
+        # 表格超过一页时页码写成区间（如 18-19），和「佐证照片」的写法一致
+        t_rng = ("%02d" % page) if table_pages == 1 else \
+                ("%02d-%02d" % (page, page + table_pages - 1))
+        body.append(_catalog_p(row("%02d " % seq, name, t_rng),
                                first_line=240))
-        page += 1
+        page += table_pages
         if photo_rows:
             # 佐证照片 = 这个小区的照片页：一行照片一页
             rng = ("%02d" % page) if photo_rows == 1 else \
@@ -1559,10 +1586,11 @@ def record_ledger(rid):
     blocks = []
     if before or after:
         blocks.append({"num": 1, "before": before, "after": after})
+    one = [(1, r)]
     groups = [{
         "community": r["community"] or "未填小区",
-        "rows": [(1, r)],
-        "pad": 8,
+        "rows": one,
+        "pages": _ledger_pages(one),
         "blocks": blocks,
     }]
     buf = _ledger_workbook(groups)
