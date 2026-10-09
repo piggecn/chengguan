@@ -973,14 +973,33 @@ def _ledger_groups_from(where, params):
     by_comm = {}
     for r in records:
         by_comm.setdefault(r["community"] or "未填小区", []).append(r)
+
+    def _comm_town(recs):
+        """一个小区只认一个乡镇：按记录条数的多数票定，票数相同取最近一条（id 最大）。
+
+        同一小区被填成两个乡镇时（历史数据难免），必须只归一个乡镇，
+        否则排序用的乡镇和表头显示的乡镇会取自不同记录，导出里同一个小区
+        会被拆成两块（饶州街道 → 鄱阳镇 → 饶州街道 → 鄱阳镇）。
+        """
+        cnt, last = {}, {}
+        for r in recs:
+            t = (r.get("town") or "").strip()
+            cnt[t] = cnt.get(t, 0) + 1
+            last[t] = max(last.get(t, -1), r["id"])
+        return max(cnt, key=lambda t: (cnt[t], last[t]))
+
+    def _town_rank(t):
+        """排序用的乡镇序号：饶州街道 0、鄱阳镇 1，认不出的排最后。"""
+        return TOWNS.index(t) if t in TOWNS else len(TOWNS)
+
     # 小区排序：先按乡镇（饶州街道在上、鄱阳镇在下），同乡镇内再按小区名
     def _group_key(item):
         comm, recs = item
-        t = (recs[0]["town"] or "").strip() if recs[0].get("town") else ""
-        return (TOWNS.index(t) if t in TOWNS else len(TOWNS), comm)
+        return (_town_rank(_comm_town(recs)), comm)
 
     groups = []
     for comm, _recs in sorted(by_comm.items(), key=_group_key):
+        town = _comm_town(_recs)   # 排序与表头用同一个值，不再各取一条记录
         recs = sorted(by_comm.get(comm, []),
                       key=lambda r: (order.get(r["category"], 99), r["id"]))
         rows = []
@@ -1005,7 +1024,7 @@ def _ledger_groups_from(where, params):
                                "after_thumbs": [thumb_of(p) for p in a]})
         groups.append({
             "community": comm, "rows": rows,
-            "town": (recs[0]["town"] or "").strip() if recs and recs[0].get("town") else "",
+            "town": town,
             "pad": max(0, 9 - len(rows)),  # 预览/表格固定 9 行序号空间
             "blocks": blocks,
         })
